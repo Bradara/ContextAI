@@ -2211,6 +2211,11 @@ pub fn run() {
         .setup(|app| {
             app.manage(AppState::new(spawn_player(app.handle().clone())));
             app.manage(copilot::CopilotState::default());
+            // The windows are `"create": false` in tauri.conf.json: a bundled page loads at once and
+            // its commands would read AppState before it is managed.
+            for config in app.config().app.windows.clone() {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?.build()?;
+            }
             let state = app.state::<AppState>();
             let popup = app
                 .get_webview_window("popup-menu")

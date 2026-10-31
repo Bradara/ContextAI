@@ -17,6 +17,7 @@
     "windows": [
       {
         "label": "popup-menu",
+        "create": false,
         "title": "ContextAI",
         "width": 30,
         "height": 30,
@@ -30,6 +31,7 @@
       },
       {
         "label": "reader",
+        "create": false,
         "title": "ContextAI Reader",
         "width": 360,
         "height": 190,
@@ -43,6 +45,7 @@
       },
       {
         "label": "chat-panel",
+        "create": false,
         "title": "ContextAI",
         "width": 420,
         "height": 600,
