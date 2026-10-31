@@ -1,0 +1,36 @@
+[package]
+name = "contextai"
+version = "0.1.0"
+description = "Context-aware desktop AI assistant"
+authors = ["ContextAI"]
+edition = "2021"
+
+[lib]
+name = "contextai_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+arboard = "3"
+enigo = "0.3"
+futures-util = "0.3"
+github-copilot-sdk = { version = "1.0.28", default-features = false, features = ["runtime"] }
+rdev = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+rodio = { version = "0.21", default-features = false, features = ["playback", "wav"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
+tokio = { version = "1", features = ["process", "time", "sync", "net", "io-util"] }
+whatlang = "0.18"
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
