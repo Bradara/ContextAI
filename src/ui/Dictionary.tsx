@@ -189,7 +189,7 @@ export default function Dictionary({
           <div className="empty">
             <span className="empty-mark">📖</span>
             <h1>Няма активни речници</h1>
-            <p>Добавете речници във формат Babylon (.bgl) от настройките.</p>
+            <p>Добавете речници Babylon (.bgl) или StarDict (.ifo) от настройките.</p>
             <button className="dictionary-add" onClick={onSettings}>Добави речници</button>
           </div>
         )}

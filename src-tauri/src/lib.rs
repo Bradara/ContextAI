@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 mod autostart;
 mod copilot;
 mod dictionary;
+mod stardict;
 
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 

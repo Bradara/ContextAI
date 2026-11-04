@@ -5,7 +5,8 @@
 //! with the articles as UTF-8 and a sorted key index; later only the index is kept in memory and
 //! the articles are read from the cache file on demand.
 //!
-//! Other formats (StarDict) can be added by returning `ParsedDictionary` from `read_dictionary`.
+//! StarDict (`.ifo` + `.idx` + `.dict[.dz]`) is read in `stardict.rs`; each format returns a
+//! `ParsedDictionary` from `read_dictionary`.
 
 use std::{
     borrow::Cow,
@@ -92,10 +93,25 @@ fn same_path(a: &str, b: &str) -> bool {
     a.to_lowercase() == b.to_lowercase()
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Format {
+    Babylon,
+    StarDict,
+}
+
+fn format_of(path: &Path) -> Option<Format> {
+    let extension = path.extension()?.to_str()?;
+    if extension.eq_ignore_ascii_case("bgl") {
+        Some(Format::Babylon)
+    } else if extension.eq_ignore_ascii_case("ifo") {
+        Some(Format::StarDict)
+    } else {
+        None
+    }
+}
+
 fn is_supported_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("bgl"))
+    format_of(path).is_some()
 }
 
 fn file_name(path: &str) -> String {
@@ -110,27 +126,39 @@ fn file_name(path: &str) -> String {
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Debug, Default, PartialEq)]
-struct Article {
-    headword: String,
-    alternates: Vec<String>,
-    part_of_speech: String,
-    transcription: String,
+pub(crate) struct Article {
+    pub(crate) headword: String,
+    pub(crate) alternates: Vec<String>,
+    pub(crate) part_of_speech: String,
+    pub(crate) transcription: String,
     /// HTML as written by the dictionary; sanitized when shown.
-    html: String,
+    pub(crate) html: String,
 }
 
 #[derive(Debug, Default)]
-struct ParsedDictionary {
-    title: String,
-    articles: Vec<Article>,
+pub(crate) struct ParsedDictionary {
+    pub(crate) title: String,
+    pub(crate) articles: Vec<Article>,
 }
 
 fn read_dictionary(path: &Path) -> Result<ParsedDictionary, String> {
-    if !is_supported_file(path) {
-        return Err("Поддържат се само речници във формат Babylon (.bgl).".to_string());
+    match format_of(path) {
+        Some(Format::Babylon) => {
+            let contents =
+                fs::read(path).map_err(|error| format!("Неуспешно прочитане: {error}"))?;
+            parse_bgl(&contents)
+        }
+        Some(Format::StarDict) => crate::stardict::read(path),
+        None => Err("Поддържат се речници Babylon (.bgl) и StarDict (.ifo).".to_string()),
     }
-    let contents = fs::read(path).map_err(|error| format!("Неуспешно прочитане: {error}"))?;
-    parse_bgl(&contents)
+}
+
+/// The files a dictionary is read from; a change in any of them rebuilds the index.
+fn component_files(path: &Path) -> Vec<PathBuf> {
+    match format_of(path) {
+        Some(Format::StarDict) => crate::stardict::component_files(path),
+        _ => vec![path.to_path_buf()],
+    }
 }
 
 fn be_uint(bytes: &[u8]) -> u64 {
@@ -707,6 +735,11 @@ fn strip_dollar_indexes(text: &str) -> String {
     out
 }
 
+/// Markup to plain text on one line (also used by the StarDict reader).
+pub(crate) fn plain_text(text: &str) -> String {
+    clean_text(text)
+}
+
 /// Headwords and titles: plain text on one line.
 fn clean_text(text: &str) -> String {
     let text = strip_dollar_indexes(&decode_entities(&strip_tags(text)));
@@ -774,16 +807,25 @@ struct SourceStamp {
 }
 
 fn source_stamp(path: &Path) -> Result<SourceStamp, String> {
-    let metadata = fs::metadata(path).map_err(|_| "Файлът не е намерен.".to_string())?;
-    let modified = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |duration| duration.as_secs());
-    Ok(SourceStamp {
-        length: metadata.len(),
-        modified,
-    })
+    // Fails only when the file that was added (.bgl / .ifo) is gone.
+    fs::metadata(path).map_err(|_| "Файлът не е намерен.".to_string())?;
+    let mut stamp = SourceStamp {
+        length: 0,
+        modified: 0,
+    };
+    for file in component_files(path) {
+        let Ok(metadata) = fs::metadata(&file) else {
+            continue;
+        };
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_secs());
+        stamp.length = stamp.length.wrapping_add(metadata.len());
+        stamp.modified = stamp.modified.max(modified);
+    }
+    Ok(stamp)
 }
 
 fn cache_file(cache_dir: &Path, source: &Path) -> PathBuf {
@@ -1306,13 +1348,13 @@ pub async fn dictionary_add(app: AppHandle, folder: bool) -> Result<usize, Strin
         }
         if folder {
             dialog
-                .set_title("Папка с речници (.bgl)")
+                .set_title("Папка с речници (.bgl, StarDict)")
                 .blocking_pick_folder()
                 .map(|folder| vec![folder])
         } else {
             dialog
                 .set_title("Речници")
-                .add_filter("Babylon (.bgl)", &["bgl", "BGL"])
+                .add_filter("Речници (.bgl, .ifo)", &["bgl", "BGL", "ifo", "IFO"])
                 .blocking_pick_files()
         }
     })
@@ -1329,7 +1371,7 @@ pub async fn dictionary_add(app: AppHandle, folder: bool) -> Result<usize, Strin
             find_dictionaries(directory, 0, &mut found);
         }
         if found.is_empty() {
-            return Err("В папката няма .bgl речници.".to_string());
+            return Err("В папката няма речници (.bgl или StarDict .ifo).".to_string());
         }
         found
     } else {
