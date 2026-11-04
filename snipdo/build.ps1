@@ -10,7 +10,7 @@ param([switch] $PowerShell)
 $ErrorActionPreference = 'Stop'
 
 # -PowerShell: one SnipDo button per entry; `menu` opens the full ContextAI action bar with its submenus.
-# Direct buttons can be added for: translate, explain, summarize, edit, grammar, ask, read, translate-read,
+# Direct buttons can be added for: translate, explain, summarize, edit, grammar, ask, read, translate-read, dictionary,
 # e.g. @{ action = 'translate'; title = 'Преведи' }.
 $actions = @(
     @{ action = 'menu'; title = 'ContextAI'; icon = $true }

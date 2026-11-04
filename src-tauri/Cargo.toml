@@ -13,8 +13,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+ammonia = "4.2.4"
 arboard = "3"
+chardetng = "1.0.0"
+encoding_rs = "0.8.44"
 enigo = "0.3"
+flate2 = "1.1.10"
 futures-util = "0.3"
 github-copilot-sdk = { version = "1.0.28", default-features = false, features = ["runtime"] }
 rdev = "0.5"
@@ -23,14 +27,17 @@ rodio = { version = "0.21", default-features = false, features = ["playback", "w
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-window-state = "2"
 tokio = { version = "1", features = ["process", "time", "sync", "net", "io-util"] }
 whatlang = "0.18"
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", default-features = false, features = ["windows-native"] }
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-registry = "0.6"
+windows-result = "0.4"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

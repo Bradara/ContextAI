@@ -159,6 +159,8 @@ export default function Popup() {
 
   const readAloud = () => run(() => invoke("start_reading", { text: selection }));
 
+  const openDictionary = () => run(() => invoke("open_dictionary", { text: selection }));
+
   /// Collects a full (non-streamed) answer from the chat provider.
   async function completeWithAi(current: ProviderSettings, text: string) {
     const { providerId, model } = resolveChatProvider(current);
@@ -247,6 +249,16 @@ export default function Popup() {
         >
           <span className="action-icon">{busy ? "…" : "🔊"}</span>
           <span>{busy ? "Превеждане" : "Чети ▾"}</span>
+        </button>
+        <button
+          className="action"
+          title="Търси в речниците"
+          disabled={busy}
+          onClick={() => void openDictionary()}
+          onMouseEnter={() => submenu && scheduleClose()}
+        >
+          <span className="action-icon">📖</span>
+          <span>Речник</span>
         </button>
         {error && <div className="popup-error" title={error}>{error}</div>}
       </div>

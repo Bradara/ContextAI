@@ -14,7 +14,10 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+#[cfg(windows)]
+mod autostart;
 mod copilot;
+mod dictionary;
 
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -25,7 +28,7 @@ use tauri::{
 };
 
 const POPUP_COLLAPSED_SIZE: (f64, f64) = (30.0, 30.0);
-const POPUP_EXPANDED_SIZE: (f64, f64) = (240.0, 56.0);
+const POPUP_EXPANDED_SIZE: (f64, f64) = (310.0, 56.0);
 const PAUSE_LABEL: &str = "Спри засичането";
 const RESUME_LABEL: &str = "Пусни засичането";
 
@@ -182,7 +185,9 @@ fn apply_detection_paused(app: &AppHandle, paused: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
     state.paused.store(paused, Ordering::Relaxed);
     if let Some(item) = app.try_state::<PauseMenuItem>() {
-        let _ = item.0.set_text(if paused { RESUME_LABEL } else { PAUSE_LABEL });
+        let _ = item
+            .0
+            .set_text(if paused { RESUME_LABEL } else { PAUSE_LABEL });
     }
     if let Some(tray) = app.tray_by_id("contextai-tray") {
         let _ = tray.set_tooltip(Some(if paused {
@@ -370,6 +375,19 @@ fn open_chat(
         serde_json::json!({ "text": text, "action": action, "service": service }),
     )
     .map_err(|error| error.to_string())
+}
+
+/// Shows the dictionary view of the chat window and looks up `text` (empty: just opens it).
+#[tauri::command]
+fn open_dictionary(app: AppHandle, text: String) -> Result<(), String> {
+    hide_popup(app.clone())?;
+    let window = app
+        .get_webview_window("chat-panel")
+        .ok_or_else(|| "Chat window is unavailable".to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    app.emit_to("chat-panel", "dictionary-open", serde_json::json!({ "text": text }))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1620,7 +1638,9 @@ async fn replace_selection(app: AppHandle, text: String) -> Result<(), String> {
         let raw = SOURCE_WINDOW.load(Ordering::Relaxed);
         let window = HWND(raw as *mut _);
         if raw == 0 || !unsafe { IsWindow(Some(window)) }.as_bool() {
-            return Err("Прозорецът с оригиналния текст не е наличен. Използвайте „Копирай“.".to_string());
+            return Err(
+                "Прозорецът с оригиналния текст не е наличен. Използвайте „Копирай“.".to_string(),
+            );
         }
         if let Some(chat) = app.get_webview_window("chat-panel") {
             let _ = chat.hide();
@@ -1653,8 +1673,7 @@ async fn replace_selection(app: AppHandle, text: String) -> Result<(), String> {
             }
             // Let the app restore its focus and selection before the paste.
             thread::sleep(Duration::from_millis(150));
-            press_with_control(Key::V)
-                .map_err(|error| format!("Неуспешно поставяне: {error}"))?;
+            press_with_control(Key::V).map_err(|error| format!("Неуспешно поставяне: {error}"))?;
             // Apps read the clipboard after the key event; restoring too early would paste the old content.
             thread::sleep(Duration::from_millis(500));
             for attempt in 0..5 {
@@ -1704,8 +1723,10 @@ fn copy_selection_with(key: Key) -> Result<bool, String> {
         {
             thread::sleep(Duration::from_millis(10));
         }
-        Ok((unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() })
-            != clipboard_sequence)
+        Ok(
+            (unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() })
+                != clipboard_sequence,
+        )
     }
     #[cfg(not(windows))]
     {
@@ -1879,8 +1900,9 @@ fn start_global_listener(app: AppHandle, state: &AppState) {
 }
 
 /// Actions another program (the SnipDo extension) may request; `menu` opens the action bar.
-const EXTERNAL_ACTIONS: [&str; 9] = [
+const EXTERNAL_ACTIONS: [&str; 10] = [
     "menu",
+    "dictionary",
     "explain",
     "summarize",
     "edit",
@@ -1921,6 +1943,7 @@ fn handle_external_request(app: &AppHandle, request: ExternalRequest) -> Result<
             });
             Ok(())
         }
+        "dictionary" => open_dictionary(app.clone(), text),
         "menu" | "translate-read" => {
             let cursor = app.cursor_position().map_err(|error| error.to_string())?;
             let action = (request.action == "translate-read").then_some(request.action);
@@ -2008,7 +2031,9 @@ fn external_pipe_name() -> String {
     let user: String = std::env::var("USERNAME")
         .unwrap_or_default()
         .chars()
-        .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+        .filter(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
         .collect();
     format!(r"\\.\pipe\contextai-{user}")
 }
@@ -2082,7 +2107,11 @@ fn wait_for_modifiers_release() {
 }
 
 /// Shows the popup next to `cursor` (physical pixels) and hands it the selection.
-fn show_popup(app: &AppHandle, cursor: (f64, f64), payload: SelectionPayload) -> Result<(), String> {
+fn show_popup(
+    app: &AppHandle,
+    cursor: (f64, f64),
+    payload: SelectionPayload,
+) -> Result<(), String> {
     let window = app
         .get_webview_window("popup-menu")
         .ok_or_else(|| "Popup window is unavailable".to_string())?;
@@ -2139,31 +2168,48 @@ fn set_popup_non_activating(window: &tauri::WebviewWindow) -> Result<(), String>
 
 /// Whether ContextAI starts with Windows (the current user's `Run` registry key).
 #[tauri::command]
-fn get_autostart(app: AppHandle) -> Result<bool, String> {
-    use tauri_plugin_autostart::ManagerExt;
-    app.autolaunch()
-        .is_enabled()
-        .map_err(|error| error.to_string())
+fn get_autostart() -> Result<bool, String> {
+    #[cfg(windows)]
+    return autostart::is_enabled();
+    #[cfg(not(windows))]
+    Err("Автоматичното стартиране се поддържа само в Windows.".to_string())
 }
 
 #[tauri::command]
-fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
-    use tauri_plugin_autostart::ManagerExt;
-    let autolaunch = app.autolaunch();
-    if enabled {
-        autolaunch.enable()
-    } else {
-        autolaunch.disable()
+fn set_autostart(enabled: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    return autostart::set_enabled(enabled)
+        .map_err(|error| format!("Неуспешна промяна на автоматичното стартиране: {error}"));
+    #[cfg(not(windows))]
+    {
+        let _ = enabled;
+        Err("Автоматичното стартиране се поддържа само в Windows.".to_string())
     }
-    .map_err(|error| format!("Неуспешна промяна на автоматичното стартиране: {error}"))
 }
 
 pub fn run() {
+    // Only the chat keeps its place: the popup follows the cursor and the reader sits bottom-right.
+    let window_state_flags = tauri_plugin_window_state::StateFlags::POSITION
+        | tauri_plugin_window_state::StateFlags::SIZE;
     tauri::Builder::default()
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(window_state_flags)
+                .with_denylist(&["popup-menu", "reader"])
+                .build(),
+        )
+        // The chat is hidden rather than closed, so the plugin's save-on-exit alone would lose
+        // moves when the app is killed; losing focus (which hiding also causes) saves it early.
+        .on_window_event(move |window, event| {
+            if window.label() == "chat-panel" && matches!(event, tauri::WindowEvent::Focused(false))
+            {
+                use tauri_plugin_window_state::AppHandleExt;
+                if let Err(error) = window.app_handle().save_window_state(window_state_flags) {
+                    eprintln!("Could not save the chat window position: {error}");
+                }
+            }
+        })
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -2193,6 +2239,12 @@ pub fn run() {
             hide_popup,
             open_chat,
             open_settings,
+            open_dictionary,
+            dictionary::dictionary_list,
+            dictionary::dictionary_add,
+            dictionary::dictionary_save,
+            dictionary::dictionary_lookup,
+            dictionary::dictionary_suggest,
             start_reading,
             reader_control,
             get_reader_session,
@@ -2211,6 +2263,9 @@ pub fn run() {
         .setup(|app| {
             app.manage(AppState::new(spawn_player(app.handle().clone())));
             app.manage(copilot::CopilotState::default());
+            app.manage(dictionary::DictionaryState::default());
+            #[cfg(windows)]
+            autostart::repair_unquoted_entry();
             // The windows are `"create": false` in tauri.conf.json: a bundled page loads at once and
             // its commands would read AppState before it is managed.
             for config in app.config().app.windows.clone() {
@@ -2227,9 +2282,13 @@ pub fn run() {
             let settings_item =
                 MenuItem::with_id(app, "settings", "Настройки", true, None::<&str>)?;
             let chat_item = MenuItem::with_id(app, "chat", "Отвори чата", true, None::<&str>)?;
+            let dictionary_item =
+                MenuItem::with_id(app, "dictionary", "Речник", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Изход", true, None::<&str>)?;
-            let menu =
-                Menu::with_items(app, &[&pause_item, &settings_item, &chat_item, &quit_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[&pause_item, &settings_item, &chat_item, &dictionary_item, &quit_item],
+            )?;
             let icon = tauri::image::Image::new_owned(
                 (0..32 * 32)
                     .flat_map(|pixel| {
@@ -2268,6 +2327,11 @@ pub fn run() {
                             if let Err(error) = window.show().and_then(|_| window.set_focus()) {
                                 eprintln!("Could not open chat: {error}");
                             }
+                        }
+                    }
+                    "dictionary" => {
+                        if let Err(error) = open_dictionary(app.clone(), String::new()) {
+                            eprintln!("Could not open the dictionary: {error}");
                         }
                     }
                     "quit" => app.exit(0),

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import CopilotSettings from "./CopilotSettings";
+import DictionarySettings from "./DictionarySettings";
 import OtherSettings from "./OtherSettings";
 import { defaultExtraVoices, translationLanguages } from "./languages";
 
@@ -151,12 +152,13 @@ const defaults: ProviderProfile[] = definitions.map((provider) => ({
 const translationServices = ["deepl", "azure-translator", "google-translate"];
 const chatProviders = ["llama-cpp", "github-copilot", "gemini"];
 
-type Tab = "ai" | "translation" | "voice" | "other";
+export type Tab = "ai" | "translation" | "voice" | "dictionaries" | "other";
 
 const tabs: { id: Tab; label: string; description: string; groups: ProviderDefinition["category"][] }[] = [
   { id: "ai", label: "ИИ", description: "Модели за чата и действията с ИИ.", groups: ["Локален модел", "AI услуга"] },
   { id: "translation", label: "Превод", description: "Услуги и език за превод.", groups: ["Превод"] },
   { id: "voice", label: "Глас", description: "Четене на глас (TTS).", groups: ["Глас"] },
+  { id: "dictionaries", label: "Речници", description: "Речници за търсене и редът на резултатите.", groups: [] },
   { id: "other", label: "Други", description: "Системни настройки.", groups: [] },
 ];
 
@@ -172,9 +174,13 @@ function initialTab(): Tab {
 }
 
 export default function Settings({
+  initialTab: requestedTab,
+  backLabel = "Чат",
   onBack,
   onClose,
 }: {
+  initialTab?: Tab;
+  backLabel?: string;
   onBack: () => void;
   onClose: () => void;
 }) {
@@ -189,7 +195,7 @@ export default function Settings({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [testingSpeech, setTestingSpeech] = useState(false);
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const [tab, setTab] = useState<Tab>(() => requestedTab ?? initialTab());
   const currentTab = tabs.find((candidate) => candidate.id === tab)!;
 
   function selectTab(id: Tab) {
@@ -332,7 +338,7 @@ export default function Settings({
   return (
     <main className="settings">
       <header className="settings-header" data-tauri-drag-region>
-        <button className="back-button" onClick={onBack}>← Чат</button>
+        <button className="back-button" onClick={onBack}>← {backLabel}</button>
         <div data-tauri-drag-region>
           <h1>Настройки</h1>
           <p>{currentTab.description}</p>
@@ -427,6 +433,7 @@ export default function Settings({
         <p className="settings-loading">Зареждане на настройките…</p>
       ) : (
         <div className="provider-groups">
+          {tab === "dictionaries" && <DictionarySettings />}
           {tab === "other" && <OtherSettings />}
           {currentTab.groups.map((group) => (
             <section className="provider-group" key={group}>

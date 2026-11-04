@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import Dictionary, { type DictionaryRequest } from "./Dictionary";
 import Settings from "./Settings";
 import {
   type Action,
@@ -22,6 +23,7 @@ import {
 
 type Message = { role: "user" | "assistant"; content: string };
 type ChatStart = { text: string; action: Action; service?: string };
+type View = "chat" | "settings" | "dictionary";
 
 export default function App() {
   const [selection, setSelection] = useState("");
@@ -31,7 +33,10 @@ export default function App() {
   const [chatProvider, setChatProvider] = useState("ollama");
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
+  const [view, setView] = useState<View>("chat");
+  // Settings opened from the dictionary go back there and start on its tab.
+  const [settingsFrom, setSettingsFrom] = useState<View>("chat");
+  const [dictionaryRequest, setDictionaryRequest] = useState<DictionaryRequest>({ text: "", id: 0 });
   // The popup action that started the chat; decides whether an answer can replace the selection.
   const [action, setAction] = useState<Action | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
@@ -95,11 +100,21 @@ export default function App() {
       });
       keepOrRemove(
         await listen("settings-open", () => {
-          setShowSettings(true);
+          setSettingsFrom("chat");
+          setView("settings");
+        }),
+      );
+      keepOrRemove(
+        await listen<{ text: string }>("dictionary-open", ({ payload }) => {
+          // An empty text (tray menu) keeps the last search.
+          const text = payload.text.trim();
+          if (text) setDictionaryRequest((current) => ({ text, id: current.id + 1 }));
+          setView("dictionary");
         }),
       );
       keepOrRemove(
         await listen<ChatStart>("chat-start", ({ payload }) => {
+          setView("chat");
           setSelection(payload.text);
           selectionRef.current = payload.text;
           setAction(payload.action);
@@ -206,14 +221,31 @@ export default function App() {
     }
   }
 
-  if (showSettings) {
+  if (view === "settings") {
     return (
       <Settings
+        initialTab={settingsFrom === "dictionary" ? "dictionaries" : undefined}
+        backLabel={settingsFrom === "dictionary" ? "Речник" : "Чат"}
         onBack={() => {
-          setShowSettings(false);
+          setView(settingsFrom);
           void refreshChatProvider().catch((cause) => {
             setError(`Неуспешно зареждане на доставчика: ${String(cause)}`);
           });
+        }}
+        onClose={() => void getCurrentWindow().hide()}
+      />
+    );
+  }
+
+  if (view === "dictionary") {
+    return (
+      <Dictionary
+        request={dictionaryRequest}
+        onSearch={(text) => setDictionaryRequest((current) => ({ text, id: current.id + 1 }))}
+        onBack={() => setView("chat")}
+        onSettings={() => {
+          setSettingsFrom("dictionary");
+          setView("settings");
         }}
         onClose={() => void getCurrentWindow().hide()}
       />
@@ -233,7 +265,17 @@ export default function App() {
             </small>
           </div>
         </div>
-        <button className="settings-shortcut" title="Настройки на доставчиците" onClick={() => setShowSettings(true)}>
+        <button className="settings-shortcut" title="Речник" onClick={() => setView("dictionary")}>
+          📖
+        </button>
+        <button
+          className="settings-shortcut next"
+          title="Настройки на доставчиците"
+          onClick={() => {
+            setSettingsFrom("chat");
+            setView("settings");
+          }}
+        >
           ⚙
         </button>
         <button className="close" title="Затвори" onClick={() => void getCurrentWindow().hide()}>
