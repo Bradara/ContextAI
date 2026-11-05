@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { type Card, htmlToText, languagePair } from "./cards";
+import type { ReviewCounts } from "./Review";
 
 const PAGE = 200;
 const SEARCH_DELAY_MS = 200;
@@ -26,10 +27,14 @@ function date(value: number) {
 export default function Words({
   tabs,
   onLookup,
+  onReview,
+  onSettings,
   onClose,
 }: {
   tabs: ReactNode;
   onLookup: (term: string) => void;
+  onReview: () => void;
+  onSettings: () => void;
   onClose: () => void;
 }) {
   const [cards, setCards] = useState<Card[]>([]);
@@ -43,7 +48,25 @@ export default function Words({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [counts, setCounts] = useState<ReviewCounts | null>(null);
   const loadToken = useRef(0);
+
+  // Today's practice counter, kept current by the backend (answers, new words, time).
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    invoke<ReviewCounts>("review_counts")
+      .then((current) => !disposed && setCounts(current))
+      .catch(() => {});
+    void listen<ReviewCounts>("review-changed", ({ payload }) => setCounts(payload)).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   async function load(before?: number) {
     const token = ++loadToken.current;
@@ -151,10 +174,19 @@ export default function Words({
         <div data-tauri-drag-region>
           <h1>Думи</h1>
           <p>
-            {total === null ? "Запазени думи за учене." : `${wordCount(total)} за учене.`} Упражненията идват в
-            следващата версия.
+            {total === null ? "Запазени думи за учене." : `${wordCount(total)} за учене.`}
           </p>
         </div>
+        <button
+          className={`review-start${counts && counts.new + counts.due > 0 ? " waiting" : ""}`}
+          title="Упражнение: нови думи и думи за повторение днес"
+          onClick={onReview}
+        >
+          Упражнение{counts && counts.new + counts.due > 0 ? ` · ${counts.new} нови · ${counts.due}` : ""}
+        </button>
+        <button className="settings-shortcut" title="Настройки на упражненията" onClick={onSettings}>
+          ⚙
+        </button>
         <button className="close settings-close" title="Затвори" onClick={onClose}>
           ×
         </button>

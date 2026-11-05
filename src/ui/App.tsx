@@ -7,6 +7,7 @@ import History from "./History";
 import type { HistoryEntry } from "./historyTypes";
 import Settings from "./Settings";
 import ViewTabs, { type MainView } from "./ViewTabs";
+import Review from "./Review";
 import Words from "./Words";
 import { type NewCard, isWord } from "./cards";
 import {
@@ -28,7 +29,7 @@ import {
 
 type Message = { role: "user" | "assistant"; content: string };
 type ChatStart = { text: string; action: Action; service?: string };
-type View = MainView | "settings";
+type View = MainView | "settings" | "review";
 
 export default function App() {
   const [selection, setSelection] = useState("");
@@ -114,6 +115,11 @@ export default function App() {
         await listen("settings-open", () => {
           setSettingsFrom("chat");
           setView("settings");
+        }),
+      );
+      keepOrRemove(
+        await listen("review-open", () => {
+          setView("review");
         }),
       );
       keepOrRemove(
@@ -319,9 +325,23 @@ export default function App() {
     return (
       <Settings
         initialTab={
-          settingsFrom === "dictionary" ? "dictionaries" : settingsFrom === "history" ? "history" : undefined
+          settingsFrom === "dictionary"
+            ? "dictionaries"
+            : settingsFrom === "history"
+              ? "history"
+              : settingsFrom === "words"
+                ? "words"
+                : undefined
         }
-        backLabel={settingsFrom === "dictionary" ? "Речник" : settingsFrom === "history" ? "История" : "Чат"}
+        backLabel={
+          settingsFrom === "dictionary"
+            ? "Речник"
+            : settingsFrom === "history"
+              ? "История"
+              : settingsFrom === "words"
+                ? "Думи"
+                : "Чат"
+        }
         onBack={() => {
           setView(settingsFrom);
           void refreshChatProvider().catch((cause) => {
@@ -345,10 +365,16 @@ export default function App() {
     );
   }
 
+  if (view === "review") {
+    return <Review tabs={tabs("words")} onBack={() => setView("words")} onClose={hide} />;
+  }
+
   if (view === "words") {
     return (
       <Words
         tabs={tabs("words")}
+        onReview={() => setView("review")}
+        onSettings={() => openSettings("words")}
         onLookup={(text) => {
           setDictionaryRequest((current) => ({ text, id: current.id + 1 }));
           setView("dictionary");

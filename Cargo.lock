@@ -527,6 +527,7 @@ version = "0.1.0"
 dependencies = [
  "ammonia",
  "chardetng",
+ "chrono",
  "encoding_rs",
  "flate2",
  "rusqlite",

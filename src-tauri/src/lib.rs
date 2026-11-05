@@ -20,6 +20,7 @@ mod cards;
 mod copilot;
 mod dictionary;
 mod history;
+mod review;
 
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -191,13 +192,7 @@ fn apply_detection_paused(app: &AppHandle, paused: bool) -> Result<(), String> {
             .0
             .set_text(if paused { RESUME_LABEL } else { PAUSE_LABEL });
     }
-    if let Some(tray) = app.tray_by_id("contextai-tray") {
-        let _ = tray.set_tooltip(Some(if paused {
-            "ContextAI (засичането е спряно)"
-        } else {
-            "ContextAI"
-        }));
-    }
+    review::update_tray(app, paused);
     if paused {
         let _ = hide_popup(app.clone());
     }
@@ -207,9 +202,14 @@ fn apply_detection_paused(app: &AppHandle, paused: bool) -> Result<(), String> {
     save_preferences(app, &preferences)
 }
 
+fn detection_paused(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .is_some_and(|state| state.paused.load(Ordering::Relaxed))
+}
+
 #[tauri::command]
 fn get_detection_paused(app: AppHandle) -> bool {
-    app.state::<AppState>().paused.load(Ordering::Relaxed)
+    detection_paused(&app)
 }
 
 #[tauri::command]
@@ -2285,6 +2285,11 @@ pub fn run() {
             cards::card_save,
             cards::card_update,
             cards::card_delete,
+            review::review_counts,
+            review::review_next,
+            review::review_answer,
+            review::review_settings,
+            review::review_save_settings,
             start_reading,
             reader_control,
             get_reader_session,
@@ -2325,6 +2330,8 @@ pub fn run() {
             let chat_item = MenuItem::with_id(app, "chat", "Отвори чата", true, None::<&str>)?;
             let dictionary_item =
                 MenuItem::with_id(app, "dictionary", "Речник", true, None::<&str>)?;
+            let review_item = MenuItem::with_id(app, "review", "Упражнение", true, None::<&str>)?;
+            app.manage(review::ReviewTray::new(review_item.clone()));
             let quit_item = MenuItem::with_id(app, "quit", "Изход", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
@@ -2333,28 +2340,12 @@ pub fn run() {
                     &settings_item,
                     &chat_item,
                     &dictionary_item,
+                    &review_item,
                     &quit_item,
                 ],
             )?;
-            let icon = tauri::image::Image::new_owned(
-                (0..32 * 32)
-                    .flat_map(|pixel| {
-                        let x = pixel % 32;
-                        let y = pixel / 32;
-                        let inside = (8..24).contains(&x) && (8..24).contains(&y);
-                        if inside {
-                            [72_u8, 131, 255, 255]
-                        } else {
-                            [0, 0, 0, 0]
-                        }
-                    })
-                    .collect(),
-                32,
-                32,
-            );
-
-            TrayIconBuilder::with_id("contextai-tray")
-                .icon(icon)
+            TrayIconBuilder::with_id(review::TRAY_ID)
+                .icon(review::tray_icon(false))
                 .tooltip("ContextAI")
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
@@ -2381,6 +2372,11 @@ pub fn run() {
                             eprintln!("Could not open the dictionary: {error}");
                         }
                     }
+                    "review" => {
+                        if let Err(error) = review::open(app) {
+                            eprintln!("Could not open the practice: {error}");
+                        }
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -2389,6 +2385,7 @@ pub fn run() {
             if load_preferences(app.handle()).detection_paused {
                 apply_detection_paused(app.handle(), true)?;
             }
+            review::start_refreshing(app.handle().clone());
             // The SnipDo extension reads this to start ContextAI when it is not running.
             if let (Ok(exe), Ok(path)) = (
                 std::env::current_exe(),

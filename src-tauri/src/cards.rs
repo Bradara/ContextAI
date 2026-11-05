@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, State};
 
 fn changed(app: &AppHandle) {
     let _ = app.emit("cards-changed", ());
+    crate::review::refresh(app);
 }
 
 #[tauri::command]

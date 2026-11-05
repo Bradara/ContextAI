@@ -149,7 +149,7 @@ fn card_row(row: &Row) -> rusqlite::Result<Card> {
 }
 
 impl Storage {
-    fn card_by_id(connection: &rusqlite::Connection, id: &str) -> Result<Card, String> {
+    pub(super) fn card_by_id(connection: &rusqlite::Connection, id: &str) -> Result<Card, String> {
         connection
             .query_row(
                 &format!("SELECT {COLUMNS} FROM cards c WHERE c.id = ?1"),

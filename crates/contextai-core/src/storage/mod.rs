@@ -6,6 +6,7 @@
 
 mod cards;
 mod history;
+mod review;
 
 use std::{
     path::Path,
@@ -21,6 +22,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 pub use cards::{Card, CardEdit, CardQuery, NewCard, SavedCard};
 pub use history::{HistoryEntry, HistoryKind, HistoryQuery, HistorySettings, NewHistoryEntry};
+pub use review::{Direction, ReviewCounts, ReviewItem, ReviewSettings};
 
 /// Each step runs once, in order, inside one transaction with the version bump.
 const MIGRATIONS: &[&str] = &[
@@ -121,6 +123,22 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (card_id, direction)
     );
     CREATE INDEX card_states_due ON card_states (due_at);
+    "#,
+    // 3: the review log and when each direction of a word was first and last reviewed.
+    r#"
+    ALTER TABLE card_states ADD COLUMN first_reviewed_at INTEGER;
+    ALTER TABLE card_states ADD COLUMN last_reviewed_at INTEGER;
+    CREATE TABLE reviews (
+        seq INTEGER PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
+        card_id TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+        direction TEXT NOT NULL,
+        rated_at INTEGER NOT NULL,
+        rating INTEGER NOT NULL,
+        interval_days REAL NOT NULL,
+        elapsed_days REAL NOT NULL
+    );
+    CREATE INDEX reviews_card ON reviews (card_id, direction);
     "#,
 ];
 
