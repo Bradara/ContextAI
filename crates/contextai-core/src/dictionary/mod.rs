@@ -32,11 +32,29 @@ const MAX_SUGGESTIONS: usize = 30;
 // Settings and formats
 // ---------------------------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DictionaryConfig {
     pub path: String,
     pub enabled: bool,
+    /// The user's choice of languages (ISO 639-1); empty = as the dictionary says.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_lang: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub target_lang: String,
+}
+
+impl DictionaryConfig {
+    /// The configured languages, or the ones the dictionary declares (or that were detected).
+    fn languages(&self, detected_source: &str, detected_target: &str) -> (String, String) {
+        let pick = |chosen: &str, detected: &str| {
+            if chosen.is_empty() { detected } else { chosen }.to_string()
+        };
+        (
+            pick(&self.source_lang, detected_source),
+            pick(&self.target_lang, detected_target),
+        )
+    }
 }
 
 /// `dictionaries.json`; the order of the list is the order of the results.
@@ -92,6 +110,9 @@ pub(crate) struct Article {
 #[derive(Debug, Default)]
 pub(crate) struct ParsedDictionary {
     pub(crate) title: String,
+    /// ISO 639-1 codes; empty when unknown.
+    pub(crate) source_lang: String,
+    pub(crate) target_lang: String,
     pub(crate) articles: Vec<Article>,
 }
 
@@ -154,6 +175,11 @@ pub struct DictionaryInfo {
     /// ready | indexing | error | missing
     pub status: &'static str,
     pub error: Option<String>,
+    /// Languages in use (the user's choice or the detected ones) and the detected ones alone.
+    pub source_lang: String,
+    pub target_lang: String,
+    pub detected_source_lang: String,
+    pub detected_target_lang: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -171,6 +197,8 @@ pub struct DictionaryEntry {
 pub struct DictionaryGroup {
     pub path: String,
     pub name: String,
+    pub source_lang: String,
+    pub target_lang: String,
     pub entries: Vec<DictionaryEntry>,
 }
 
@@ -187,6 +215,20 @@ pub struct LookupResult {
     pub enabled: usize,
 }
 
+/// Dictionary HTML made safe to show: no scripts, styles, images or external links.
+pub(crate) fn sanitize_html(html: &str) -> String {
+    index::sanitize_definition(html)
+}
+
+/// The text of an article on one line, for search and summaries.
+pub(crate) fn html_to_text(html: &str) -> String {
+    let html = html
+        .replace("<br>", " · ")
+        .replace("</p>", " · ")
+        .replace("</div>", " · ");
+    bgl::plain_text(&html).trim_matches([' ', '·']).to_string()
+}
+
 /// Characters of the first article kept in the history.
 const HISTORY_SUMMARY_CHARS: usize = 300;
 
@@ -195,13 +237,8 @@ impl LookupResult {
     /// the dictionaries that had it. None when nothing was found.
     pub fn history_entry(&self) -> Option<crate::storage::NewHistoryEntry> {
         let first = self.groups.first()?.entries.first()?;
-        let html = first
-            .html
-            .replace("<br>", " · ")
-            .replace("</p>", " · ")
-            .replace("</div>", " · ");
-        let text = bgl::plain_text(&html);
-        let text = text.trim_matches([' ', '·']);
+        let text = html_to_text(&first.html);
+        let text = text.as_str();
         let summary: String = match text.char_indices().nth(HISTORY_SUMMARY_CHARS) {
             Some((end, _)) => format!("{}…", &text[..end]),
             None => text.to_string(),
@@ -211,13 +248,19 @@ impl LookupResult {
             .iter()
             .map(|group| group.name.as_str())
             .collect();
+        let group = &self.groups[0];
+        let (source_lang, target_lang) = crate::language::term_languages(
+            &first.headword,
+            &group.source_lang,
+            &group.target_lang,
+        );
         Some(crate::storage::NewHistoryEntry {
             kind: crate::storage::HistoryKind::Dictionary,
             query: first.headword.clone(),
             result: summary,
             provider: names.join(", "),
-            source_lang: String::new(),
-            target_lang: String::new(),
+            source_lang,
+            target_lang,
         })
     }
 }
@@ -311,7 +354,7 @@ pub struct Dictionaries {
     inner: Arc<Inner>,
 }
 
-type EnabledIndexes = (Vec<(String, Arc<DictionaryIndex>)>, Vec<String>);
+type EnabledIndexes = (Vec<(DictionaryConfig, Arc<DictionaryIndex>)>, Vec<String>);
 
 impl Dictionaries {
     /// `settings_path` is the JSON list of dictionaries, `cache_dir` holds one index per
@@ -401,6 +444,10 @@ impl Dictionaries {
                     articles: 0,
                     status: "indexing",
                     error: None,
+                    source_lang: dictionary.source_lang.clone(),
+                    target_lang: dictionary.target_lang.clone(),
+                    detected_source_lang: String::new(),
+                    detected_target_lang: String::new(),
                 };
                 let Ok(stamp) = source_stamp(&path) else {
                     info.status = "missing";
@@ -411,6 +458,10 @@ impl Dictionaries {
                 {
                     info.status = "ready";
                     info.articles = header.articles;
+                    (info.source_lang, info.target_lang) =
+                        dictionary.languages(&header.source_lang, &header.target_lang);
+                    info.detected_source_lang = header.source_lang;
+                    info.detected_target_lang = header.target_lang;
                     if !header.title.is_empty() {
                         info.name = header.title;
                     }
@@ -442,6 +493,7 @@ impl Dictionaries {
                 settings.dictionaries.push(DictionaryConfig {
                     path: text,
                     enabled: true,
+                    ..Default::default()
                 });
                 added.push(path);
             }
@@ -502,7 +554,7 @@ impl Dictionaries {
                 .state
                 .index(&self.inner.cache_dir, Path::new(&dictionary.path))
             {
-                Ok(index) => indexes.push((dictionary.path.clone(), index)),
+                Ok(index) => indexes.push((dictionary.clone(), index)),
                 Err(error) => errors.push(format!("{}: {error}", file_name(&dictionary.path))),
             }
         }
@@ -517,7 +569,10 @@ impl Dictionaries {
         let mut groups = Vec::new();
         let mut matched = String::new();
         for candidate in &candidates {
-            for (path, index) in &indexes {
+            for (dictionary, index) in &indexes {
+                let path = &dictionary.path;
+                let (source_lang, target_lang) =
+                    dictionary.languages(&index.source_lang, &index.target_lang);
                 let mut offsets = index.exact(candidate);
                 if offsets.is_empty() {
                     continue;
@@ -526,6 +581,8 @@ impl Dictionaries {
                 match index.read_entries(&offsets) {
                     Ok(entries) => groups.push(DictionaryGroup {
                         path: path.clone(),
+                        source_lang,
+                        target_lang,
                         name: if index.title.is_empty() {
                             file_name(path)
                         } else {
@@ -577,7 +634,7 @@ fn query_candidates(query: &str) -> Vec<String> {
 }
 
 fn suggestions(
-    indexes: &[(String, Arc<DictionaryIndex>)],
+    indexes: &[(DictionaryConfig, Arc<DictionaryIndex>)],
     prefix: &str,
     limit: usize,
 ) -> Vec<String> {
@@ -593,7 +650,7 @@ fn suggestions(
 }
 
 /// Words that share the longest possible beginning with `word`, for "did you mean".
-fn nearby_words(indexes: &[(String, Arc<DictionaryIndex>)], word: &str) -> Vec<String> {
+fn nearby_words(indexes: &[(DictionaryConfig, Arc<DictionaryIndex>)], word: &str) -> Vec<String> {
     let characters: Vec<char> = word.chars().collect();
     for length in (2.min(characters.len())..=characters.len()).rev() {
         let prefix: String = characters[..length].iter().collect();
@@ -785,8 +842,10 @@ mod live_tests {
                 }
             }
             println!(
-                "{}: {} keys, built {built:?}, 4 lookups {:?}",
+                "{} [{} -> {}]: {} keys, built {built:?}, 4 lookups {:?}",
                 index.title,
+                index.source_lang,
+                index.target_lang,
                 index.key_ends.len(),
                 started.elapsed()
             );

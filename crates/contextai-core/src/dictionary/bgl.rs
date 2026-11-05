@@ -5,6 +5,7 @@ use std::{borrow::Cow, io::Read};
 use encoding_rs::Encoding;
 
 use super::{Article, ParsedDictionary};
+use crate::language::babylon_language;
 
 pub(crate) fn be_uint(bytes: &[u8]) -> u64 {
     bytes
@@ -201,6 +202,7 @@ pub(crate) fn parse_bgl(file: &[u8]) -> Result<ParsedDictionary, String> {
     let blocks = bgl_blocks(&payload);
 
     let (mut title, mut utf8) = (Vec::new(), false);
+    let (mut source_lang, mut target_lang) = ("", "");
     let (mut default, mut source, mut target) = (None, None, None);
     let mut raw_entries = Vec::new();
     for &(kind, data) in &blocks {
@@ -212,6 +214,8 @@ pub(crate) fn parse_bgl(file: &[u8]) -> Result<ParsedDictionary, String> {
                 let value = &data[2..];
                 match be_uint(&data[..2]) {
                     0x01 => title = value.to_vec(),
+                    0x07 if value.len() <= 8 => source_lang = babylon_language(be_uint(value)),
+                    0x08 if value.len() <= 8 => target_lang = babylon_language(be_uint(value)),
                     0x11 if value.len() <= 8 => utf8 = be_uint(value) & 0x8000 != 0,
                     0x1a => source = babylon_charset(value[0]),
                     0x1b => target = babylon_charset(value[0]),
@@ -251,7 +255,12 @@ pub(crate) fn parse_bgl(file: &[u8]) -> Result<ParsedDictionary, String> {
         .filter_map(|entry| article(entry, encodings))
         .collect();
     let title = clean_text(&decode_bgl_text(&title, encodings.source, encodings.source));
-    Ok(ParsedDictionary { title, articles })
+    Ok(ParsedDictionary {
+        title,
+        articles,
+        source_lang: source_lang.to_string(),
+        target_lang: target_lang.to_string(),
+    })
 }
 
 pub(crate) fn article(entry: &RawEntry, encodings: Encodings) -> Option<Article> {

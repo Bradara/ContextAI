@@ -16,6 +16,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 mod autostart;
+mod cards;
 mod copilot;
 mod dictionary;
 mod history;
@@ -2278,6 +2279,12 @@ pub fn run() {
             history::history_clear,
             history::history_settings,
             history::history_save_settings,
+            cards::cards_list,
+            cards::cards_count,
+            cards::cards_saved,
+            cards::card_save,
+            cards::card_update,
+            cards::card_delete,
             start_reading,
             reader_control,
             get_reader_session,

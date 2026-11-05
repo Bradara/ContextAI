@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { languageName } from "./cards";
+import { translationLanguages } from "./languages";
 
 type DictionaryInfo = {
   path: string;
@@ -9,7 +11,14 @@ type DictionaryInfo = {
   articles: number;
   status: "ready" | "indexing" | "error" | "missing";
   error?: string;
+  sourceLang: string;
+  targetLang: string;
+  detectedSourceLang: string;
+  detectedTargetLang: string;
 };
+
+/// The user's choice, or "" when the dictionary's own (detected) language is used.
+const chosen = (value: string, detected: string) => (value === detected ? "" : value);
 
 function dictionaryCount(count: number) {
   return count === 1 ? "1 речник" : `${count} речника`;
@@ -80,7 +89,12 @@ export default function DictionarySettings() {
     setDictionaries(next);
     try {
       await invoke("dictionary_save", {
-        dictionaries: next.map(({ path, enabled }) => ({ path, enabled })),
+        dictionaries: next.map((item) => ({
+          path: item.path,
+          enabled: item.enabled,
+          sourceLang: chosen(item.sourceLang, item.detectedSourceLang),
+          targetLang: chosen(item.targetLang, item.detectedTargetLang),
+        })),
       });
     } catch (cause) {
       setError(String(cause));
@@ -145,6 +159,36 @@ export default function DictionarySettings() {
                 {dictionary.path}
               </p>
               <p className={`dictionary-status ${dictionary.status}`}>{statusText(dictionary)}</p>
+              <div className="dictionary-languages" title="Езикът на думите и на значенията; използва се за запазените думи">
+                {(["sourceLang", "targetLang"] as const).map((key, side) => {
+                  const detected = key === "sourceLang" ? dictionary.detectedSourceLang : dictionary.detectedTargetLang;
+                  const codes = [...new Set([...translationLanguages.map((language) => language.code), dictionary[key]])].filter(
+                    Boolean,
+                  );
+                  return (
+                    <span key={key}>
+                      {side === 1 && <span className="dictionary-arrow">→</span>}
+                      <select
+                        value={chosen(dictionary[key], detected)}
+                        onChange={(event) =>
+                          void save(
+                            list.map((item, position) =>
+                              position === index ? { ...item, [key]: event.target.value || detected } : item,
+                            ),
+                          )
+                        }
+                      >
+                        <option value="">{detected ? `${languageName(detected)} (от речника)` : "неизвестен"}</option>
+                        {codes.map((code) => (
+                          <option key={code} value={code}>
+                            {languageName(code)}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                  );
+                })}
+              </div>
             </div>
             <div className="dictionary-controls">
               <label className="toggle">

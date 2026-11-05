@@ -2,4 +2,5 @@
 //! same code serves the desktop app now and other platforms (macOS, Linux, mobile) later.
 
 pub mod dictionary;
+pub mod language;
 pub mod storage;

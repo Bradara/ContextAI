@@ -103,7 +103,7 @@ fn truncate(text: &str) -> String {
 }
 
 /// `слънч дом` → `"слънч"* "дом"*`: every word must match the beginning of a word.
-fn fts_query(search: &str) -> Option<String> {
+pub(super) fn fts_query(search: &str) -> Option<String> {
     let terms: Vec<String> = search
         .split_whitespace()
         .map(|term| term.replace('"', ""))

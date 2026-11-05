@@ -473,3 +473,46 @@ button { color: inherit; cursor: pointer; }
   display: block; margin: 12px auto 0; padding: 6px 14px; border: 1px solid #34435e; border-radius: 9px;
   background: #1b2940; color: #cbd7ec; font-size: 11px;
 }
+
+/* ☆ in the dictionary and under a translation */
+.dictionary-save {
+  margin-left: auto; width: 24px; height: 22px; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: #8fa8d4; font-size: 14px; line-height: 22px; text-align: center;
+}
+button.dictionary-save:hover { background: #26334a; color: #f5c76b; }
+.dictionary-save.saved { color: #f5c76b; cursor: default; }
+.message-saved { align-self: center; color: #f5c76b; font-size: 11px; }
+
+/* Language pair per dictionary in the settings */
+.dictionary-languages { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+.dictionary-languages select {
+  max-width: 150px; padding: 3px 5px; border: 1px solid #303e56; border-radius: 6px; outline: none;
+  background: #101a2a; color: #cbd7ec; font-size: 9.5px;
+}
+.dictionary-arrow { margin-right: 4px; color: #6f7d94; font-size: 10px; }
+
+/* Words view */
+.words-list ul { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
+.word-card { padding: 10px 12px; border: 1px solid #2d3a52; border-radius: 12px; background: #151f30; }
+.word-card.editing { border-color: #587fda; }
+.word-card .setting-field > span { width: 118px; }
+.word-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; }
+.word-heading strong { color: #f1f5ff; font-size: 14px; overflow-wrap: anywhere; }
+.word-pair {
+  padding: 1px 6px; border-radius: 999px; background: #1f2d47; color: #8fa8d4; font-size: 9px; letter-spacing: .4px;
+}
+.word-actions { margin-left: auto; padding: 0; }
+.word-card:hover .word-actions { opacity: 1; }
+.word-meaning {
+  margin-top: 5px; cursor: pointer;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.word-meaning.expanded { display: block; cursor: default; }
+.word-context { margin: 7px 0 0; padding: 4px 9px; border-left: 2px solid #3b4d6e; color: #aab8cf; font-size: 11px; font-style: italic; }
+.word-context p { margin: 2px 0; }
+.word-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 7px; }
+.word-tag {
+  padding: 1px 7px; border: 1px solid #34435e; border-radius: 999px; background: transparent; color: #aab8cf; font-size: 9.5px;
+}
+.word-tag:hover { border-color: #587fda; color: white; }
+.copilot-actions button.primary { border-color: #668df0; background: #668df0; color: white; }

@@ -1,8 +1,10 @@
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { NewCard } from "./cards";
 
 type Entry = { headword: string; partOfSpeech: string; transcription: string; html: string };
-type Group = { path: string; name: string; entries: Entry[] };
+type Group = { path: string; name: string; sourceLang: string; targetLang: string; entries: Entry[] };
 type LookupResult = {
   query: string;
   matched: string;
@@ -35,6 +37,8 @@ export default function Dictionary({
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [highlighted, setHighlighted] = useState(-1);
+  // Lower-cased headwords that are already saved as words to learn.
+  const [saved, setSaved] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLElement>(null);
   // Ignores suggestions that arrive after the input changed again.
@@ -64,6 +68,47 @@ export default function Dictionary({
       current = false;
     };
   }, [request]);
+
+  // The ☆ of each article follows the saved words, also when they change in the Words view.
+  const headwords = result ? [...new Set(result.groups.flatMap((group) => group.entries.map((entry) => entry.headword)))] : [];
+  const headwordKey = headwords.join("\n");
+  useEffect(() => {
+    if (!headwords.length) return;
+    let current = true;
+    const refresh = () =>
+      invoke<boolean[]>("cards_saved", { terms: headwords })
+        .then((flags) => {
+          if (current) setSaved(new Set(headwords.filter((_, index) => flags[index]).map((word) => word.toLowerCase())));
+        })
+        .catch(() => {});
+    void refresh();
+    let unlisten: (() => void) | undefined;
+    void listen("cards-changed", () => void refresh()).then((stop) => {
+      if (current) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      current = false;
+      unlisten?.();
+    };
+  }, [headwordKey]);
+
+  async function saveWord(group: Group, entry: Entry) {
+    const card: NewCard = {
+      term: entry.headword,
+      sourceLang: group.sourceLang,
+      targetLang: group.targetLang,
+      meaning: entry.html,
+      transcription: entry.transcription,
+      source: group.name,
+    };
+    try {
+      await invoke("card_save", { card });
+      setSaved((current) => new Set(current).add(entry.headword.toLowerCase()));
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }
 
   function changeInput(text: string) {
     setInput(text);
@@ -221,6 +266,22 @@ export default function Dictionary({
                   <strong>{entry.headword}</strong>
                   {entry.transcription && <span className="dictionary-transcription">[{entry.transcription}]</span>}
                   {entry.partOfSpeech && <em>{entry.partOfSpeech}</em>}
+                  {saved.has(entry.headword.toLowerCase()) ? (
+                    <span className="dictionary-save saved" title="Запазена в Думи">
+                      ★
+                    </span>
+                  ) : (
+                    <button
+                      className="dictionary-save"
+                      title="Запази в Думи за учене"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void saveWord(group, entry);
+                      }}
+                    >
+                      ☆
+                    </button>
+                  )}
                 </div>
                 {/* Sanitized in Rust (ammonia): no scripts, styles, images or external links. */}
                 <div className="dictionary-definition" dangerouslySetInnerHTML={{ __html: entry.html }} />

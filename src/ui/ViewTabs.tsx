@@ -1,9 +1,10 @@
-export type MainView = "chat" | "dictionary" | "history";
+export type MainView = "chat" | "dictionary" | "history" | "words";
 
 const views: { id: MainView; label: string }[] = [
   { id: "chat", label: "Чат" },
   { id: "dictionary", label: "Речник" },
   { id: "history", label: "История" },
+  { id: "words", label: "Думи" },
 ];
 
 /// The row of tabs under the header of the chat window.

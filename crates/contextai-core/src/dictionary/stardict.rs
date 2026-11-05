@@ -301,8 +301,32 @@ pub(crate) fn read(ifo: &Path) -> Result<ParsedDictionary, String> {
     if articles.is_empty() {
         return Err("Речникът не съдържа статии.".to_string());
     }
+    // StarDict has no language fields; guess them from words and articles spread over the whole
+    // dictionary (the first ones in alphabetical order are prefixes and abbreviations).
+    let step = |count: usize| articles.len() / count + 1;
+    let words: Vec<&str> = articles
+        .iter()
+        .step_by(step(3000))
+        .map(|article| article.headword.as_str())
+        .collect();
+    let meanings: Vec<String> = articles
+        .iter()
+        .step_by(step(300))
+        .map(|article| super::bgl::plain_text(&article.html.replace("<br>", " ")))
+        .collect();
+    let target_lang = crate::language::detect_loose(&meanings.join(" ")).unwrap_or("");
+    let words = words.join(" ");
+    // Unsure about the words but written like the articles: a one-language dictionary.
+    let source_lang = crate::language::detect(&words)
+        .or_else(|| {
+            crate::language::written_in_script_of(&words, target_lang).then_some(target_lang)
+        })
+        .or_else(|| crate::language::detect_loose(&words))
+        .unwrap_or("");
     Ok(ParsedDictionary {
         title: info.title,
+        source_lang: source_lang.to_string(),
+        target_lang: target_lang.to_string(),
         articles,
     })
 }

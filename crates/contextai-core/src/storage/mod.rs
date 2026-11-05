@@ -1,9 +1,10 @@
-//! The local database (`contextai.db`, SQLite): history now; chats and words to learn later.
+//! The local database (`contextai.db`, SQLite): history and words to learn; chats later.
 //!
 //! Rows carry UUIDv7 ids, `updated_at` and a `deleted_at` tombstone instead of being removed at
 //! once, so that a later sync between devices can merge them. Schema changes are numbered
 //! migrations tracked in `PRAGMA user_version`.
 
+mod cards;
 mod history;
 
 use std::{
@@ -18,6 +19,7 @@ use std::{
 use rusqlite::{Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 
+pub use cards::{Card, CardEdit, CardQuery, NewCard, SavedCard};
 pub use history::{HistoryEntry, HistoryKind, HistoryQuery, HistorySettings, NewHistoryEntry};
 
 /// Each step runs once, in order, inside one transaction with the version bump.
@@ -64,6 +66,61 @@ const MIGRATIONS: &[&str] = &[
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );
+    "#,
+    // 2: words to learn, with one review state per direction.
+    r#"
+    CREATE TABLE cards (
+        seq INTEGER PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
+        term TEXT NOT NULL,
+        term_key TEXT NOT NULL,
+        language TEXT NOT NULL DEFAULT '',
+        meaning_lang TEXT NOT NULL DEFAULT '',
+        meaning_html TEXT NOT NULL DEFAULT '',
+        meaning_text TEXT NOT NULL DEFAULT '',
+        transcription TEXT NOT NULL DEFAULT '',
+        context TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        tags TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        deleted_at INTEGER
+    );
+    CREATE UNIQUE INDEX cards_term ON cards (term_key, language) WHERE deleted_at IS NULL;
+    CREATE INDEX cards_created ON cards (created_at DESC) WHERE deleted_at IS NULL;
+
+    CREATE VIRTUAL TABLE cards_fts USING fts5(
+        term, meaning_text, context, tags,
+        content = 'cards', content_rowid = 'seq',
+        tokenize = 'unicode61 remove_diacritics 2'
+    );
+    CREATE TRIGGER cards_fts_insert AFTER INSERT ON cards BEGIN
+        INSERT INTO cards_fts (rowid, term, meaning_text, context, tags)
+            VALUES (new.seq, new.term, new.meaning_text, new.context, new.tags);
+    END;
+    CREATE TRIGGER cards_fts_delete AFTER DELETE ON cards BEGIN
+        INSERT INTO cards_fts (cards_fts, rowid, term, meaning_text, context, tags)
+            VALUES ('delete', old.seq, old.term, old.meaning_text, old.context, old.tags);
+    END;
+    CREATE TRIGGER cards_fts_update AFTER UPDATE OF term, meaning_text, context, tags ON cards BEGIN
+        INSERT INTO cards_fts (cards_fts, rowid, term, meaning_text, context, tags)
+            VALUES ('delete', old.seq, old.term, old.meaning_text, old.context, old.tags);
+        INSERT INTO cards_fts (rowid, term, meaning_text, context, tags)
+            VALUES (new.seq, new.term, new.meaning_text, new.context, new.tags);
+    END;
+
+    CREATE TABLE card_states (
+        card_id TEXT NOT NULL REFERENCES cards (id) ON DELETE CASCADE,
+        direction TEXT NOT NULL CHECK (direction IN ('forward', 'reverse')),
+        due_at INTEGER NOT NULL,
+        interval_days REAL NOT NULL DEFAULT 0,
+        ease REAL NOT NULL DEFAULT 2.5,
+        reps INTEGER NOT NULL DEFAULT 0,
+        lapses INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (card_id, direction)
+    );
+    CREATE INDEX card_states_due ON card_states (due_at);
     "#,
 ];
 

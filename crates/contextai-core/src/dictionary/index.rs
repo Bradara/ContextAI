@@ -13,13 +13,13 @@ use super::{component_files, DictionaryEntry, ParsedDictionary};
 
 /// Longer keys are not indexed; they are sentences rather than words.
 const MAX_KEY_BYTES: usize = 250;
-const CACHE_MAGIC: &[u8; 8] = b"CTXDIC01";
+const CACHE_MAGIC: &[u8; 8] = b"CTXDIC02";
 
 // ---------------------------------------------------------------------------------------------
 // Cache file
 //
 // magic (8) | index offset u64 | source length u64 | source mtime u64 | article count u32 |
-// title (u32 length + UTF-8) | articles (4 × length-prefixed strings) |
+// title, source language, target language (each u32 length + UTF-8) | articles (4 × length-prefixed strings) |
 // index: key count u32, then per key: u16 length, key, u64 article offset (sorted by key)
 // ---------------------------------------------------------------------------------------------
 
@@ -81,7 +81,14 @@ pub(crate) fn write_cache(
     writer.write_all(&stamp.length.to_le_bytes())?;
     writer.write_all(&stamp.modified.to_le_bytes())?;
     writer.write_all(&(dictionary.articles.len() as u32).to_le_bytes())?;
-    let mut position = 36 + write_string(&mut writer, &dictionary.title)?;
+    let mut position = 36;
+    for text in [
+        &dictionary.title,
+        &dictionary.source_lang,
+        &dictionary.target_lang,
+    ] {
+        position += write_string(&mut writer, text)?;
+    }
 
     let mut keys: Vec<(String, u64)> = Vec::new();
     for article in &dictionary.articles {
@@ -124,6 +131,8 @@ pub(crate) struct CacheHeader {
     pub(crate) stamp: SourceStamp,
     pub(crate) articles: u32,
     pub(crate) title: String,
+    pub(crate) source_lang: String,
+    pub(crate) target_lang: String,
 }
 
 pub(crate) fn read_u64(reader: &mut impl Read) -> io::Result<u64> {
@@ -167,6 +176,8 @@ pub(crate) fn read_header(reader: &mut impl Read) -> io::Result<CacheHeader> {
     };
     let articles = read_u32(reader)?;
     let title = read_string(reader)?;
+    let source_lang = read_string(reader)?;
+    let target_lang = read_string(reader)?;
     if index_offset == 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -178,6 +189,8 @@ pub(crate) fn read_header(reader: &mut impl Read) -> io::Result<CacheHeader> {
         stamp,
         articles,
         title,
+        source_lang,
+        target_lang,
     })
 }
 
@@ -193,6 +206,8 @@ pub(crate) struct DictionaryIndex {
     pub(crate) cache: PathBuf,
     pub(crate) stamp: SourceStamp,
     pub(crate) title: String,
+    pub(crate) source_lang: String,
+    pub(crate) target_lang: String,
     /// All keys concatenated; `key_ends[i]` is where key `i` ends.
     pub(crate) keys: String,
     pub(crate) key_ends: Vec<u32>,
@@ -233,6 +248,8 @@ impl DictionaryIndex {
             cache: cache.to_path_buf(),
             stamp: header.stamp,
             title: header.title,
+            source_lang: header.source_lang,
+            target_lang: header.target_lang,
             keys,
             key_ends,
             targets,

@@ -7,6 +7,8 @@ import History from "./History";
 import type { HistoryEntry } from "./historyTypes";
 import Settings from "./Settings";
 import ViewTabs, { type MainView } from "./ViewTabs";
+import Words from "./Words";
+import { type NewCard, isWord } from "./cards";
 import {
   type Action,
   type ProviderSettings,
@@ -45,6 +47,9 @@ export default function App() {
   const actionRef = useRef<Action | null>(null);
   // Target language of a translation by the chat model, for its history entry.
   const translationTargetRef = useRef("");
+  // The translation shown in the chat, so that a translated word can be saved to learn.
+  const [translation, setTranslation] = useState<{ source: string; target: string; provider: string } | null>(null);
+  const [wordSaved, setWordSaved] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const streamingRef = useRef(false);
   const requestId = useRef("");
@@ -81,6 +86,7 @@ export default function App() {
     try {
       const result = await invoke<TranslationResult>("translate_text", { providerId: serviceId, text });
       if (requestId.current !== id) return;
+      setTranslation({ source: result.detectedLanguage, target: result.targetLanguage, provider: serviceId });
       chatHistory.current = [...chatHistory.current, { role: "assistant", content: result.text }];
       setMessages(chatHistory.current);
     } catch (cause) {
@@ -125,6 +131,8 @@ export default function App() {
           selectionRef.current = payload.text;
           setAction(payload.action);
           actionRef.current = payload.action;
+          setTranslation(null);
+          setWordSaved(false);
           setCopiedIndex(null);
           setMessages([]);
           chatHistory.current = [];
@@ -139,6 +147,9 @@ export default function App() {
                 return translateWithService(service, payload.text);
               }
               translationTargetRef.current = settings.translationTargetLanguage ?? "";
+              if (payload.action === "translate") {
+                setTranslation({ source: "", target: translationTargetRef.current, provider: chatProviderRef.current });
+              }
               const instruction =
                 payload.action === "translate"
                   ? translateInstruction(settings.translationTargetLanguage)
@@ -235,12 +246,46 @@ export default function App() {
     setCopiedIndex(null);
     setError("");
     setInput("");
+    setTranslation({ source: entry.sourceLang, target: entry.targetLang, provider: entry.provider });
+    setWordSaved(false);
     chatHistory.current = [
       { role: "user", content: "Преведи избрания текст (от историята)." },
       { role: "assistant", content: entry.result },
     ];
     setMessages(chatHistory.current);
     setView("chat");
+  }
+
+  // Whether the translated word is already among the words to learn.
+  useEffect(() => {
+    if (!translation || !isWord(selection)) return;
+    let current = true;
+    invoke<boolean[]>("cards_saved", { terms: [selection] })
+      .then(([saved]) => current && setWordSaved(saved))
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [translation, selection]);
+
+  async function saveTranslatedWord(meaning: string) {
+    if (!translation) return;
+    const card: NewCard = {
+      term: selection,
+      sourceLang: translation.source,
+      targetLang: translation.target,
+      meaning,
+      meaningIsText: true,
+      source:
+        translationServiceNames[translation.provider] ??
+        (chatProviderNames[translation.provider] ? `ИИ · ${chatProviderNames[translation.provider]}` : translation.provider),
+    };
+    try {
+      await invoke("card_save", { card });
+      setWordSaved(true);
+    } catch (cause) {
+      setError(String(cause));
+    }
   }
 
   function openSettings(from: View) {
@@ -295,6 +340,19 @@ export default function App() {
         request={dictionaryRequest}
         onSearch={(text) => setDictionaryRequest((current) => ({ text, id: current.id + 1 }))}
         onSettings={() => openSettings("dictionary")}
+        onClose={hide}
+      />
+    );
+  }
+
+  if (view === "words") {
+    return (
+      <Words
+        tabs={tabs("words")}
+        onLookup={(text) => {
+          setDictionaryRequest((current) => ({ text, id: current.id + 1 }));
+          setView("dictionary");
+        }}
         onClose={hide}
       />
     );
@@ -372,18 +430,32 @@ export default function App() {
             message.role === "assistant" && finished && selection
               ? replacementText(message.content, action, index === 1)
               : "";
+          const savable =
+            message.role === "assistant" && finished && index === 1 && translation !== null && isWord(selection);
           return (
             <article className={`message ${message.role}`} key={`${index}-${message.role}`}>
               <div className="message-label">{message.role === "assistant" ? "ContextAI" : "Вие"}</div>
               <div className="message-content">{displayText(message.content)}</div>
-              {replacement && (
+              {(replacement || savable) && (
                 <div className="message-actions">
-                  <button className="primary" onClick={() => void replaceInSource(replacement)}>
-                    Замени в оригинала
-                  </button>
-                  <button onClick={() => void copyAnswer(replacement, index)}>
-                    {copiedIndex === index ? "Копирано ✓" : "Копирай"}
-                  </button>
+                  {replacement && (
+                    <>
+                      <button className="primary" onClick={() => void replaceInSource(replacement)}>
+                        Замени в оригинала
+                      </button>
+                      <button onClick={() => void copyAnswer(replacement, index)}>
+                        {copiedIndex === index ? "Копирано ✓" : "Копирай"}
+                      </button>
+                    </>
+                  )}
+                  {savable &&
+                    (wordSaved ? (
+                      <span className="message-saved">★ В Думи</span>
+                    ) : (
+                      <button onClick={() => void saveTranslatedWord(displayText(message.content).trim())}>
+                        ☆ Запази думата
+                      </button>
+                    ))}
                 </div>
               )}
             </article>
