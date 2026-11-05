@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 mod autostart;
 mod copilot;
 mod dictionary;
-mod stardict;
+mod history;
 
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -387,8 +387,12 @@ fn open_dictionary(app: AppHandle, text: String) -> Result<(), String> {
         .ok_or_else(|| "Chat window is unavailable".to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
-    app.emit_to("chat-panel", "dictionary-open", serde_json::json!({ "text": text }))
-        .map_err(|error| error.to_string())
+    app.emit_to(
+        "chat-panel",
+        "dictionary-open",
+        serde_json::json!({ "text": text }),
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1124,11 +1128,32 @@ async fn translate_with_azure(
 
 /// Translates into the configured language (Bulgarian by default), or into the
 /// fallback language when the text is already in the target language.
+/// Translates with a translation service and records the result in the history.
 #[tauri::command]
 async fn translate_text(
     app: AppHandle,
     provider_id: String,
     text: String,
+) -> Result<TranslationResult, String> {
+    let result = translate_with_service(app.clone(), &provider_id, &text).await?;
+    history::record(
+        &app,
+        contextai_core::storage::NewHistoryEntry {
+            kind: contextai_core::storage::HistoryKind::Translation,
+            query: text,
+            result: result.text.clone(),
+            provider: provider_id,
+            source_lang: result.detected_language.clone(),
+            target_lang: result.target_language.clone(),
+        },
+    );
+    Ok(result)
+}
+
+async fn translate_with_service(
+    app: AppHandle,
+    provider_id: &str,
+    text: &str,
 ) -> Result<TranslationResult, String> {
     let text = text.trim();
     if text.is_empty() {
@@ -1139,7 +1164,7 @@ async fn translate_text(
             "Текстът е твърде дълъг за превод (максимум {TRANSLATION_MAX_CHARS} знака)."
         ));
     }
-    let (service, missing_key) = match provider_id.as_str() {
+    let (service, missing_key) = match provider_id {
         "deepl" => (
             "DeepL",
             "Липсва DeepL API ключ. DeepL API Free също изисква ключ: създайте безплатен акаунт на deepl.com/pro-api и го въведете в настройките.",
@@ -1158,7 +1183,7 @@ async fn translate_text(
         .into_iter()
         .find(|provider| provider.id == provider_id && provider.enabled)
         .ok_or_else(|| format!("Активирайте и запазете {service} в настройките."))?;
-    let key = load_provider_secret(&provider_id)?.ok_or_else(|| missing_key.to_string())?;
+    let key = load_provider_secret(provider_id)?.ok_or_else(|| missing_key.to_string())?;
 
     if provider_id == "azure-translator" {
         return translate_with_azure(
@@ -2246,6 +2271,13 @@ pub fn run() {
             dictionary::dictionary_save,
             dictionary::dictionary_lookup,
             dictionary::dictionary_suggest,
+            history::history_list,
+            history::history_add,
+            history::history_pin,
+            history::history_delete,
+            history::history_clear,
+            history::history_settings,
+            history::history_save_settings,
             start_reading,
             reader_control,
             get_reader_session,
@@ -2264,7 +2296,8 @@ pub fn run() {
         .setup(|app| {
             app.manage(AppState::new(spawn_player(app.handle().clone())));
             app.manage(copilot::CopilotState::default());
-            app.manage(dictionary::DictionaryState::default());
+            app.manage(dictionary::create(app.handle())?);
+            app.manage(history::open(app.handle()));
             #[cfg(windows)]
             autostart::repair_unquoted_entry();
             // The windows are `"create": false` in tauri.conf.json: a bundled page loads at once and
@@ -2288,7 +2321,13 @@ pub fn run() {
             let quit_item = MenuItem::with_id(app, "quit", "Изход", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
-                &[&pause_item, &settings_item, &chat_item, &dictionary_item, &quit_item],
+                &[
+                    &pause_item,
+                    &settings_item,
+                    &chat_item,
+                    &dictionary_item,
+                    &quit_item,
+                ],
             )?;
             let icon = tauri::image::Image::new_owned(
                 (0..32 * 32)

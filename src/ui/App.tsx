@@ -3,7 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Dictionary, { type DictionaryRequest } from "./Dictionary";
+import History from "./History";
+import type { HistoryEntry } from "./historyTypes";
 import Settings from "./Settings";
+import ViewTabs, { type MainView } from "./ViewTabs";
 import {
   type Action,
   type ProviderSettings,
@@ -23,7 +26,7 @@ import {
 
 type Message = { role: "user" | "assistant"; content: string };
 type ChatStart = { text: string; action: Action; service?: string };
-type View = "chat" | "settings" | "dictionary";
+type View = MainView | "settings";
 
 export default function App() {
   const [selection, setSelection] = useState("");
@@ -39,6 +42,9 @@ export default function App() {
   const [dictionaryRequest, setDictionaryRequest] = useState<DictionaryRequest>({ text: "", id: 0 });
   // The popup action that started the chat; decides whether an answer can replace the selection.
   const [action, setAction] = useState<Action | null>(null);
+  const actionRef = useRef<Action | null>(null);
+  // Target language of a translation by the chat model, for its history entry.
+  const translationTargetRef = useRef("");
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const streamingRef = useRef(false);
   const requestId = useRef("");
@@ -118,6 +124,7 @@ export default function App() {
           setSelection(payload.text);
           selectionRef.current = payload.text;
           setAction(payload.action);
+          actionRef.current = payload.action;
           setCopiedIndex(null);
           setMessages([]);
           chatHistory.current = [];
@@ -131,6 +138,7 @@ export default function App() {
               if (payload.action === "translate" && isTranslationService(service)) {
                 return translateWithService(service, payload.text);
               }
+              translationTargetRef.current = settings.translationTargetLanguage ?? "";
               const instruction =
                 payload.action === "translate"
                   ? translateInstruction(settings.translationTargetLanguage)
@@ -156,6 +164,18 @@ export default function App() {
             ...chatHistory.current,
             { role: "assistant", content: streamBuffer.current },
           ];
+          // The first answer of "Преведи" with the chat model is a translation for the history.
+          if (actionRef.current === "translate" && chatHistory.current.length === 2 && streamBuffer.current.trim()) {
+            void invoke("history_add", {
+              entry: {
+                kind: "translation",
+                query: selectionRef.current,
+                result: streamBuffer.current.trim(),
+                provider: chatProviderRef.current,
+                targetLang: translationTargetRef.current,
+              },
+            });
+          }
           setMessages(chatHistory.current);
           streamingRef.current = false;
           setStreaming(false);
@@ -202,6 +222,35 @@ export default function App() {
     }
   }
 
+  /// Shows a translation from the history as a finished chat that can be continued.
+  function openTranslation(entry: HistoryEntry) {
+    requestId.current = crypto.randomUUID();
+    streamingRef.current = false;
+    setStreaming(false);
+    setSelection(entry.query);
+    selectionRef.current = entry.query;
+    // No "Замени в оригинала": the source window of that selection is gone.
+    setAction(null);
+    actionRef.current = null;
+    setCopiedIndex(null);
+    setError("");
+    setInput("");
+    chatHistory.current = [
+      { role: "user", content: "Преведи избрания текст (от историята)." },
+      { role: "assistant", content: entry.result },
+    ];
+    setMessages(chatHistory.current);
+    setView("chat");
+  }
+
+  function openSettings(from: View) {
+    setSettingsFrom(from);
+    setView("settings");
+  }
+
+  const tabs = (current: MainView) => <ViewTabs current={current} onSelect={setView} />;
+  const hide = () => void getCurrentWindow().hide();
+
   async function replaceInSource(text: string) {
     setError("");
     try {
@@ -224,8 +273,10 @@ export default function App() {
   if (view === "settings") {
     return (
       <Settings
-        initialTab={settingsFrom === "dictionary" ? "dictionaries" : undefined}
-        backLabel={settingsFrom === "dictionary" ? "Речник" : "Чат"}
+        initialTab={
+          settingsFrom === "dictionary" ? "dictionaries" : settingsFrom === "history" ? "history" : undefined
+        }
+        backLabel={settingsFrom === "dictionary" ? "Речник" : settingsFrom === "history" ? "История" : "Чат"}
         onBack={() => {
           setView(settingsFrom);
           void refreshChatProvider().catch((cause) => {
@@ -240,14 +291,26 @@ export default function App() {
   if (view === "dictionary") {
     return (
       <Dictionary
+        tabs={tabs("dictionary")}
         request={dictionaryRequest}
         onSearch={(text) => setDictionaryRequest((current) => ({ text, id: current.id + 1 }))}
-        onBack={() => setView("chat")}
-        onSettings={() => {
-          setSettingsFrom("dictionary");
-          setView("settings");
+        onSettings={() => openSettings("dictionary")}
+        onClose={hide}
+      />
+    );
+  }
+
+  if (view === "history") {
+    return (
+      <History
+        tabs={tabs("history")}
+        onOpenDictionary={(text) => {
+          setDictionaryRequest((current) => ({ text, id: current.id + 1 }));
+          setView("dictionary");
         }}
-        onClose={() => void getCurrentWindow().hide()}
+        onOpenTranslation={openTranslation}
+        onSettings={() => openSettings("history")}
+        onClose={hide}
       />
     );
   }
@@ -265,23 +328,14 @@ export default function App() {
             </small>
           </div>
         </div>
-        <button className="settings-shortcut" title="Речник" onClick={() => setView("dictionary")}>
-          📖
-        </button>
-        <button
-          className="settings-shortcut next"
-          title="Настройки на доставчиците"
-          onClick={() => {
-            setSettingsFrom("chat");
-            setView("settings");
-          }}
-        >
+        <button className="settings-shortcut" title="Настройки на доставчиците" onClick={() => openSettings("chat")}>
           ⚙
         </button>
         <button className="close" title="Затвори" onClick={() => void getCurrentWindow().hide()}>
           ×
         </button>
       </header>
+      {tabs("chat")}
 
       <section className="model-row">
         <label htmlFor="model">{chatProviderNames[chatProvider]} модел</label>

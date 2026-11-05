@@ -405,3 +405,71 @@ button { color: inherit; cursor: pointer; }
 .dictionary-buttons button:disabled { cursor: default; opacity: .35; }
 .dictionary-buttons button.danger { background: #3a202c; border-color: #713a48; color: #ffb7c2; }
 .dictionary-message { margin: 8px 0 0; }
+
+/* Tabs under the header of the chat window */
+.view-tabs {
+  display: flex; gap: 2px; flex: none; padding: 6px 14px 0; border-bottom: 1px solid #253149;
+}
+.view-tabs button {
+  margin-bottom: -1px; padding: 7px 12px; border: 1px solid transparent; border-bottom: 0;
+  border-radius: 8px 8px 0 0; background: transparent; color: #8c9ab1; font-size: 11px;
+}
+.view-tabs button:hover { color: #e0e7f2; }
+.view-tabs button.active { border-color: #253149; background: #111827; color: #e8edf8; font-weight: 600; }
+.settings-header .settings-shortcut { margin-left: auto; margin-right: 0; }
+
+/* History view */
+.history-toolbar { display: flex; flex-direction: column; gap: 8px; flex: none; padding: 10px 18px; border-bottom: 1px solid #253149; }
+.history-toolbar input {
+  padding: 8px 10px; border: 1px solid #303e56; border-radius: 9px; outline: none;
+  background: #101a2a; color: #e8edf6; font-size: 12px;
+}
+.history-toolbar input:focus { border-color: #638ef2; }
+.history-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.history-filters > button {
+  padding: 4px 10px; border: 1px solid #34435e; border-radius: 999px; background: transparent;
+  color: #aab8cf; font-size: 10.5px;
+}
+.history-filters > button.active { border-color: #668df0; background: #26395c; color: white; }
+.history-filters > button.history-clear { margin-left: auto; border-color: transparent; color: #8c9ab1; }
+.history-filters > button.history-clear:hover:not(:disabled) { color: #ffb7c2; }
+.history-filters > button:disabled { cursor: default; opacity: .4; }
+.history-confirm { display: flex; align-items: center; gap: 6px; margin-left: auto; color: #ffb7c2; font-size: 10.5px; }
+.history-confirm button {
+  padding: 3px 9px; border: 1px solid #34435e; border-radius: 7px; background: #1b2940; color: #cbd7ec; font-size: 10.5px;
+}
+.history-confirm button.danger, .copilot-actions button.danger { border-color: #713a48; background: #3a202c; color: #ffb7c2; }
+.history-list { flex: 1; overflow: auto; padding: 4px 18px 22px; }
+.history-list ul { margin: 0; padding: 0; list-style: none; }
+.history-day {
+  margin: 14px 0 6px; color: #90a8d6; font-size: 9px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase;
+}
+.history-item { display: flex; align-items: flex-start; gap: 4px; border-radius: 10px; }
+.history-item:hover { background: #151f30; }
+.history-open {
+  flex: 1; min-width: 0; display: flex; gap: 9px; padding: 8px 6px 8px 8px; border: 0; border-radius: 10px;
+  background: transparent; text-align: left;
+}
+.history-icon { flex: none; width: 18px; color: #82a8ff; font-size: 13px; text-align: center; }
+.history-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.history-body strong {
+  color: #eef2ff; font-size: 12.5px; font-weight: 600;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
+.history-result {
+  color: #b9c5d9; font-size: 11.5px; line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
+.history-meta { color: #6f7d94; font-size: 9.5px; }
+.history-actions { flex: none; display: flex; gap: 2px; padding: 6px 4px 0 0; opacity: .35; }
+.history-item:hover .history-actions, .history-actions:focus-within { opacity: 1; }
+.history-actions button {
+  width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #9aa8bd; font-size: 13px;
+}
+.history-actions button:hover { background: #26334a; color: white; }
+.history-actions button.pinned { color: #f5c76b; }
+.history-item:has(.pinned) .history-actions { opacity: 1; }
+.history-more {
+  display: block; margin: 12px auto 0; padding: 6px 14px; border: 1px solid #34435e; border-radius: 9px;
+  background: #1b2940; color: #cbd7ec; font-size: 11px;
+}

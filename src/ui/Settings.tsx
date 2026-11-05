@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import CopilotSettings from "./CopilotSettings";
 import DictionarySettings from "./DictionarySettings";
+import HistorySettings from "./HistorySettings";
 import OtherSettings from "./OtherSettings";
 import { defaultExtraVoices, translationLanguages } from "./languages";
 
@@ -152,13 +153,14 @@ const defaults: ProviderProfile[] = definitions.map((provider) => ({
 const translationServices = ["deepl", "azure-translator", "google-translate"];
 const chatProviders = ["llama-cpp", "github-copilot", "gemini"];
 
-export type Tab = "ai" | "translation" | "voice" | "dictionaries" | "other";
+export type Tab = "ai" | "translation" | "voice" | "dictionaries" | "history" | "other";
 
 const tabs: { id: Tab; label: string; description: string; groups: ProviderDefinition["category"][] }[] = [
   { id: "ai", label: "ИИ", description: "Модели за чата и действията с ИИ.", groups: ["Локален модел", "AI услуга"] },
   { id: "translation", label: "Превод", description: "Услуги и език за превод.", groups: ["Превод"] },
   { id: "voice", label: "Глас", description: "Четене на глас (TTS).", groups: ["Глас"] },
   { id: "dictionaries", label: "Речници", description: "Речници за търсене и редът на резултатите.", groups: [] },
+  { id: "history", label: "История", description: "Какво се записва и колко дълго се пази.", groups: [] },
   { id: "other", label: "Други", description: "Системни настройки.", groups: [] },
 ];
 
@@ -434,6 +436,7 @@ export default function Settings({
       ) : (
         <div className="provider-groups">
           {tab === "dictionaries" && <DictionarySettings />}
+          {tab === "history" && <HistorySettings />}
           {tab === "other" && <OtherSettings />}
           {currentTab.groups.map((group) => (
             <section className="provider-group" key={group}>

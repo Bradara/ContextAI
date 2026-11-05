@@ -199,6 +199,18 @@ export default function Popup() {
           ? (await invoke<TranslationResult>("translate_text", { providerId: service, text })).text
           : await completeWithAi(current, text);
         if (!translated) throw new Error("Преводът е празен.");
+        // Service translations are recorded in Rust; this one came from the chat model.
+        if (!isTranslationService(service)) {
+          void invoke("history_add", {
+            entry: {
+              kind: "translation",
+              query: text,
+              result: translated,
+              provider: resolveChatProvider(current).providerId,
+              targetLang: current.translationTargetLanguage ?? "",
+            },
+          });
+        }
         await invoke("start_reading", { text: translated });
       } finally {
         setBusy(false);

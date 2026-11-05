@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type MouseEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 type Entry = { headword: string; partOfSpeech: string; transcription: string; html: string };
@@ -17,15 +17,15 @@ const SUGGEST_DELAY_MS = 120;
 const VISIBLE_SUGGESTIONS = 8;
 
 export default function Dictionary({
+  tabs,
   request,
   onSearch,
-  onBack,
   onSettings,
   onClose,
 }: {
+  tabs: ReactNode;
   request: DictionaryRequest;
   onSearch: (text: string) => void;
-  onBack: () => void;
   onSettings: () => void;
   onClose: () => void;
 }) {
@@ -122,7 +122,6 @@ export default function Dictionary({
   return (
     <main className="settings dictionary">
       <header className="settings-header" data-tauri-drag-region>
-        <button className="back-button" onClick={onBack}>← Чат</button>
         <div data-tauri-drag-region>
           <h1>Речник</h1>
           <p>Търсене в активните речници по реда от настройките.</p>
@@ -134,6 +133,7 @@ export default function Dictionary({
           ×
         </button>
       </header>
+      {tabs}
 
       <form
         className="dictionary-search"
