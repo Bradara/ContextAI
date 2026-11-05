@@ -13,6 +13,12 @@ const switches: { key: keyof Settings; title: string; description: string }[] = 
     title: "Търсения в речника",
     description: "Намерената дума и началото на статията.",
   },
+  {
+    key: "chats",
+    title: "Чатове",
+    description:
+      "Последните 20 разговора („Обясни“, „Обобщи“, „Редактирай“, „Граматика“, „Попитай“ и свободни въпроси); закачените не се броят.",
+  },
 ];
 
 /// History switches apply immediately instead of waiting for "Запази".
@@ -56,7 +62,7 @@ export default function HistorySettings() {
     <section className="provider-group">
       <h2>История</h2>
       <p className="dictionary-note">
-        Записите се пазят 30 дни, закачените (★) – докато не ги изтриете. Историята е само на този компютър
+        Преводите и търсенията се пазят 30 дни, от чатовете – последните 20; закачените (★) – докато не ги изтриете. Историята е само на този компютър
         (файлът contextai.db в %LOCALAPPDATA%\com.contextai.desktop). Промените важат веднага, без „Запази“.
       </p>
       {switches.map((item) => (

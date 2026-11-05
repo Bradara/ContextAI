@@ -2,7 +2,8 @@
 //! that an open History view refreshes when something is recorded.
 
 use contextai_core::storage::{
-    HistoryEntry, HistoryQuery, HistorySettings, NewHistoryEntry, Storage,
+    Conversation, ConversationInput, ConversationSummary, HistoryEntry, HistoryQuery,
+    HistorySettings, NewHistoryEntry, Storage,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -96,4 +97,50 @@ pub fn history_save_settings(
     settings: HistorySettings,
 ) -> Result<(), String> {
     storage.set_history_settings(&settings)
+}
+
+/// Saves the open chat after an answer; returns its id (None when chats are not recorded).
+#[tauri::command]
+pub fn chat_save(
+    app: AppHandle,
+    storage: State<'_, Storage>,
+    conversation: ConversationInput,
+) -> Result<Option<String>, String> {
+    let saved = storage.save_conversation(&conversation)?;
+    if saved.is_some() {
+        changed(&app);
+    }
+    Ok(saved.map(|summary| summary.id))
+}
+
+#[tauri::command]
+pub fn chat_list(
+    storage: State<'_, Storage>,
+    search: Option<String>,
+) -> Result<Vec<ConversationSummary>, String> {
+    storage.conversations(search.as_deref())
+}
+
+#[tauri::command]
+pub fn chat_get(storage: State<'_, Storage>, id: String) -> Result<Conversation, String> {
+    storage.conversation(&id)
+}
+
+#[tauri::command]
+pub fn chat_pin(
+    app: AppHandle,
+    storage: State<'_, Storage>,
+    id: String,
+    pinned: bool,
+) -> Result<(), String> {
+    storage.pin_conversation(&id, pinned)?;
+    changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn chat_delete(app: AppHandle, storage: State<'_, Storage>, id: String) -> Result<(), String> {
+    storage.delete_conversation(&id)?;
+    changed(&app);
+    Ok(())
 }

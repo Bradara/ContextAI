@@ -1,9 +1,12 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { type HistoryEntry, type HistoryKind, dayLabel, providerLabel } from "./historyTypes";
+import { chatProviderNames } from "./ai";
+import { type ChatSummary, type HistoryEntry, type HistoryKind, dayLabel, providerLabel } from "./historyTypes";
 
-type Filter = "all" | HistoryKind;
+type Filter = "all" | HistoryKind | "chats";
+/// One line of the list: a translation or lookup, or a chat.
+type Row = { kind: "entry"; time: number; entry: HistoryEntry } | { kind: "chat"; time: number; chat: ChatSummary };
 
 const PAGE = 100;
 const SEARCH_DELAY_MS = 200;
@@ -11,26 +14,35 @@ const filters: { id: Filter; label: string }[] = [
   { id: "all", label: "Всички" },
   { id: "translation", label: "Преводи" },
   { id: "dictionary", label: "Речник" },
+  { id: "chats", label: "Чатове" },
 ];
 
 function time(value: number) {
   return new Date(value).toLocaleTimeString("bg-BG", { hour: "2-digit", minute: "2-digit" });
 }
 
+function messageCount(count: number) {
+  return count === 1 ? "1 съобщение" : `${count} съобщения`;
+}
+
 export default function History({
   tabs,
   onOpenDictionary,
   onOpenTranslation,
+  onOpenChat,
   onSettings,
   onClose,
 }: {
   tabs: ReactNode;
   onOpenDictionary: (text: string) => void;
   onOpenTranslation: (entry: HistoryEntry) => void;
+  onOpenChat: (id: string) => void;
   onSettings: () => void;
   onClose: () => void;
 }) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
+  // Chats are few (the last 20 + pinned), so they come in one piece with the first page.
+  const [chats, setChats] = useState<ChatSummary[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -45,16 +57,25 @@ export default function History({
     const token = ++loadToken.current;
     setLoading(true);
     try {
-      const page = await invoke<HistoryEntry[]>("history_list", {
-        query: {
-          kind: filter === "all" ? null : filter,
-          search: appliedSearch || null,
-          before: before ?? null,
-          limit: PAGE,
-        },
-      });
+      const wantsEntries = filter !== "chats";
+      const wantsChats = (filter === "all" || filter === "chats") && before === undefined;
+      const [page, chatList] = await Promise.all([
+        wantsEntries
+          ? invoke<HistoryEntry[]>("history_list", {
+              query: {
+                kind: filter === "all" ? null : filter,
+                search: appliedSearch || null,
+                before: before ?? null,
+                limit: PAGE,
+              },
+            })
+          : Promise.resolve([]),
+        wantsChats ? invoke<ChatSummary[]>("chat_list", { search: appliedSearch || null }) : Promise.resolve(null),
+      ]);
       if (token !== loadToken.current) return;
       setEntries((current) => (before === undefined ? page : [...current, ...page]));
+      if (chatList !== null) setChats(chatList);
+      else if (before === undefined) setChats([]);
       setHasMore(page.length === PAGE);
       setError("");
     } catch (cause) {
@@ -73,7 +94,7 @@ export default function History({
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  // Translations and lookups made while the list is open show up at once.
+  // Translations, lookups and chats made while the list is open show up at once.
   const reload = useRef(load);
   reload.current = load;
   useEffect(() => {
@@ -98,19 +119,20 @@ export default function History({
     }
   }
 
-  const togglePin = (entry: HistoryEntry) =>
-    run(() => invoke("history_pin", { id: entry.id, pinned: !entry.pinned }));
-  const remove = (entry: HistoryEntry) => run(() => invoke("history_delete", { id: entry.id }));
   const clear = () =>
     run(async () => {
       setConfirmClear(false);
       await invoke("history_clear", { includePinned: false });
     });
 
-  function open(entry: HistoryEntry) {
-    if (entry.kind === "dictionary") onOpenDictionary(entry.query);
-    else onOpenTranslation(entry);
-  }
+  // While older entries are still to load, chats older than them wait for their turn.
+  const oldestEntry = entries.length ? entries[entries.length - 1].usedAt : 0;
+  const rows: Row[] = [
+    ...entries.map((entry): Row => ({ kind: "entry", time: entry.usedAt, entry })),
+    ...chats
+      .filter((chat) => !hasMore || chat.updatedAt >= oldestEntry)
+      .map((chat): Row => ({ kind: "chat", time: chat.updatedAt, chat })),
+  ].sort((a, b) => b.time - a.time);
 
   let lastDay = "";
 
@@ -119,7 +141,7 @@ export default function History({
       <header className="settings-header" data-tauri-drag-region>
         <div data-tauri-drag-region>
           <h1>История</h1>
-          <p>Преводи и търсения в речника от последните 30 дни. Закачените (★) остават.</p>
+          <p>Преводи и речник от последните 30 дни и последните 20 чата. Закачените (★) остават.</p>
         </div>
         <button className="settings-shortcut" title="Настройки на историята" onClick={onSettings}>
           ⚙
@@ -158,11 +180,7 @@ export default function History({
               <button onClick={() => setConfirmClear(false)}>Не</button>
             </span>
           ) : (
-            <button
-              className="history-clear"
-              disabled={entries.length === 0}
-              onClick={() => setConfirmClear(true)}
-            >
+            <button className="history-clear" disabled={rows.length === 0} onClick={() => setConfirmClear(true)}>
               Изчисти…
             </button>
           )}
@@ -171,25 +189,63 @@ export default function History({
 
       <section className="history-list">
         {error && <div className="error">{error}</div>}
-        {!loading && entries.length === 0 && !error && (
+        {!loading && rows.length === 0 && !error && (
           <div className="empty">
             <span className="empty-mark">↺</span>
             <h1>{appliedSearch || filter !== "all" ? "Няма намерени записи" : "Историята е празна"}</h1>
-            <p>Преводите и търсенията в речника се появяват тук.</p>
+            <p>Преводите, търсенията в речника и чатовете се появяват тук.</p>
           </div>
         )}
         <ul>
-          {entries.map((entry) => {
-            const day = dayLabel(entry.usedAt);
+          {rows.map((row) => {
+            const day = dayLabel(row.time);
             const heading = day !== lastDay ? day : null;
             lastDay = day;
+            if (row.kind === "chat") {
+              const chat = row.chat;
+              return (
+                <li key={`chat-${chat.id}`}>
+                  {heading && <h2 className="history-day">{heading}</h2>}
+                  <div className="history-item">
+                    <button className="history-open" title="Отвори чата" onClick={() => onOpenChat(chat.id)}>
+                      <span className="history-icon">✦</span>
+                      <span className="history-body">
+                        <strong>{chat.title}</strong>
+                        <span className="history-result">{chat.preview}</span>
+                        <span className="history-meta">
+                          {time(chat.updatedAt)} · чат · {chatProviderNames[chat.provider] ?? chat.provider} ·{" "}
+                          {messageCount(chat.messageCount)}
+                        </span>
+                      </span>
+                    </button>
+                    <div className="history-actions">
+                      <button
+                        className={chat.pinned ? "pinned" : ""}
+                        title={chat.pinned ? "Откачи" : "Закачи (не се брои в последните 20)"}
+                        onClick={() => void run(() => invoke("chat_pin", { id: chat.id, pinned: !chat.pinned }))}
+                      >
+                        {chat.pinned ? "★" : "☆"}
+                      </button>
+                      <button title="Изтрий" onClick={() => void run(() => invoke("chat_delete", { id: chat.id }))}>
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              );
+            }
+            const entry = row.entry;
             const languages =
               entry.sourceLang || entry.targetLang ? ` · ${entry.sourceLang || "?"} → ${entry.targetLang || "?"}` : "";
             return (
               <li key={entry.id}>
                 {heading && <h2 className="history-day">{heading}</h2>}
                 <div className="history-item">
-                  <button className="history-open" title="Отвори отново" onClick={() => open(entry)}>
+                  <button
+                    className="history-open"
+                    title="Отвори отново"
+                    onClick={() => (entry.kind === "dictionary" ? onOpenDictionary(entry.query) : onOpenTranslation(entry))}
+                  >
                     <span className="history-icon">{entry.kind === "dictionary" ? "📖" : "文"}</span>
                     <span className="history-body">
                       <strong>{entry.query}</strong>
@@ -204,11 +260,11 @@ export default function History({
                     <button
                       className={entry.pinned ? "pinned" : ""}
                       title={entry.pinned ? "Откачи" : "Закачи (не се изтрива след 30 дни)"}
-                      onClick={() => void togglePin(entry)}
+                      onClick={() => void run(() => invoke("history_pin", { id: entry.id, pinned: !entry.pinned }))}
                     >
                       {entry.pinned ? "★" : "☆"}
                     </button>
-                    <button title="Изтрий" onClick={() => void remove(entry)}>
+                    <button title="Изтрий" onClick={() => void run(() => invoke("history_delete", { id: entry.id }))}>
                       ×
                     </button>
                   </div>
@@ -218,11 +274,7 @@ export default function History({
           })}
         </ul>
         {hasMore && (
-          <button
-            className="history-more"
-            disabled={loading}
-            onClick={() => void load(entries[entries.length - 1]?.usedAt)}
-          >
+          <button className="history-more" disabled={loading} onClick={() => void load(oldestEntry)}>
             {loading ? "Зареждане…" : "Още"}
           </button>
         )}

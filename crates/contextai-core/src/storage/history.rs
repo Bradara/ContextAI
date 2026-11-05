@@ -274,15 +274,17 @@ impl Storage {
         Ok(())
     }
 
-    /// Deletes every entry (or every unpinned one); returns how many.
+    /// Deletes every entry and chat (or every unpinned one); returns how many.
     pub fn clear_history(&self, include_pinned: bool) -> Result<usize, String> {
-        self.connection()
+        let entries = self
+            .connection()
             .execute(
                 "UPDATE history SET query = '', result = '', deleted_at = ?1, updated_at = ?1
                  WHERE deleted_at IS NULL AND (pinned = 0 OR ?2)",
                 (now_ms(), include_pinned),
             )
-            .map_err(db_error)
+            .map_err(db_error)?;
+        Ok(entries + self.clear_conversations(include_pinned)?)
     }
 
     /// Drops unpinned entries not used for 30 days and tombstones older than that.
@@ -293,6 +295,12 @@ impl Storage {
                 "DELETE FROM history
                  WHERE (deleted_at IS NOT NULL AND deleted_at < ?1)
                     OR (deleted_at IS NULL AND pinned = 0 AND used_at < ?1)",
+                [cutoff],
+            )
+            .map_err(db_error)?;
+        self.connection()
+            .execute(
+                "DELETE FROM conversations WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
                 [cutoff],
             )
             .map_err(db_error)?;

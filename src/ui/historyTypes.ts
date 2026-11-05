@@ -17,6 +17,24 @@ export type HistoryEntry = {
 
 export type HistorySettings = { translations: boolean; dictionary: boolean; chats: boolean };
 
+export type ChatSummary = {
+  id: string;
+  title: string;
+  action: string;
+  selection: string;
+  provider: string;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+  pinned: boolean;
+  messageCount: number;
+  preview: string;
+};
+
+export type Conversation = Omit<ChatSummary, "messageCount" | "preview"> & {
+  messages: { role: "user" | "assistant"; content: string }[];
+};
+
 /// Who produced the entry: a translation service, the chat model ("ИИ · Ollama") or the dictionaries.
 export function providerLabel(entry: HistoryEntry) {
   if (entry.kind !== "translation") return entry.provider;

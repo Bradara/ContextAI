@@ -557,3 +557,7 @@ kbd {
 .review-ratings button.again { border-color: #713a48; }
 .review-ratings button.good { border-color: #2f6b52; }
 .review-ratings button:hover { background: #26334a; }
+
+/* "Нов чат" and "Изчисти контекста" side by side on the right */
+.footer > button { margin-left: auto; }
+.footer > button + button { margin-left: 10px; }

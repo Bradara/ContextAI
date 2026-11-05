@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Dictionary, { type DictionaryRequest } from "./Dictionary";
 import History from "./History";
-import type { HistoryEntry } from "./historyTypes";
+import type { Conversation, HistoryEntry } from "./historyTypes";
 import Settings from "./Settings";
 import ViewTabs, { type MainView } from "./ViewTabs";
 import Review from "./Review";
@@ -31,6 +31,20 @@ type Message = { role: "user" | "assistant"; content: string };
 type ChatStart = { text: string; action: Action; service?: string };
 type View = MainView | "settings" | "review";
 
+const actionTitles: Record<Action, string> = {
+  explain: "Обясни",
+  summarize: "Обобщи",
+  edit: "Редактирай",
+  grammar: "Граматика",
+  ask: "Попитай",
+  translate: "Преведи",
+};
+
+function oneLine(text: string, max: number) {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max)}…` : line;
+}
+
 export default function App() {
   const [selection, setSelection] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -46,6 +60,9 @@ export default function App() {
   // The popup action that started the chat; decides whether an answer can replace the selection.
   const [action, setAction] = useState<Action | null>(null);
   const actionRef = useRef<Action | null>(null);
+  // The saved chat this conversation belongs to, and its title and action for saving.
+  const conversationIdRef = useRef<string | null>(null);
+  const chatMetaRef = useRef<{ title: string; action: string } | null>(null);
   // Target language of a translation by the chat model, for its history entry.
   const translationTargetRef = useRef("");
   // The translation shown in the chat, so that a translated word can be saved to learn.
@@ -133,6 +150,11 @@ export default function App() {
       keepOrRemove(
         await listen<ChatStart>("chat-start", ({ payload }) => {
           setView("chat");
+          conversationIdRef.current = null;
+          chatMetaRef.current = {
+            title: `${actionTitles[payload.action]}: ${oneLine(payload.text, 80)}`,
+            action: payload.action,
+          };
           setSelection(payload.text);
           selectionRef.current = payload.text;
           setAction(payload.action);
@@ -196,6 +218,7 @@ export default function App() {
           setMessages(chatHistory.current);
           streamingRef.current = false;
           setStreaming(false);
+          saveChat();
         }),
       );
     };
@@ -239,8 +262,79 @@ export default function App() {
     }
   }
 
+  /// Saves the conversation after an answer (the newest 20 chats are kept).
+  function saveChat() {
+    const history = chatHistory.current;
+    const meta = chatMetaRef.current;
+    // A translation that ends with its first answer is already in the history as a translation.
+    if (meta?.action === "translate" && history.length <= 2) return;
+    const firstQuestion = history.find((message) => message.role === "user")?.content ?? "";
+    void invoke<string | null>("chat_save", {
+      conversation: {
+        id: conversationIdRef.current,
+        title: meta?.title || oneLine(firstQuestion, 100),
+        action: meta?.action ?? "",
+        selection: selectionRef.current,
+        provider: chatProviderRef.current,
+        model: modelRef.current,
+        messages: history,
+      },
+    })
+      .then((id) => {
+        if (id) conversationIdRef.current = id;
+      })
+      .catch((cause) => console.error("Could not save the chat", cause));
+  }
+
+  /// Reopens a saved chat; new questions continue it with the current chat provider.
+  async function openChat(id: string) {
+    try {
+      const conversation = await invoke<Conversation>("chat_get", { id });
+      requestId.current = crypto.randomUUID();
+      streamingRef.current = false;
+      setStreaming(false);
+      conversationIdRef.current = conversation.id;
+      chatMetaRef.current = { title: conversation.title, action: conversation.action };
+      setSelection(conversation.selection);
+      selectionRef.current = conversation.selection;
+      // No "Замени в оригинала": the source window of that selection is gone.
+      setAction(null);
+      actionRef.current = null;
+      setTranslation(null);
+      setCopiedIndex(null);
+      setError("");
+      setInput("");
+      chatHistory.current = conversation.messages;
+      setMessages(conversation.messages);
+      setView("chat");
+    } catch (cause) {
+      setError(String(cause));
+      setView("chat");
+    }
+  }
+
+  function newChat() {
+    requestId.current = crypto.randomUUID();
+    streamingRef.current = false;
+    setStreaming(false);
+    conversationIdRef.current = null;
+    chatMetaRef.current = null;
+    setSelection("");
+    selectionRef.current = "";
+    setAction(null);
+    actionRef.current = null;
+    setTranslation(null);
+    setCopiedIndex(null);
+    setError("");
+    setInput("");
+    chatHistory.current = [];
+    setMessages([]);
+  }
+
   /// Shows a translation from the history as a finished chat that can be continued.
   function openTranslation(entry: HistoryEntry) {
+    conversationIdRef.current = null;
+    chatMetaRef.current = { title: `${actionTitles.translate}: ${oneLine(entry.query, 80)}`, action: "translate" };
     requestId.current = crypto.randomUUID();
     streamingRef.current = false;
     setStreaming(false);
@@ -393,6 +487,7 @@ export default function App() {
           setView("dictionary");
         }}
         onOpenTranslation={openTranslation}
+        onOpenChat={(id) => void openChat(id)}
         onSettings={() => openSettings("history")}
         onClose={hide}
       />
@@ -520,6 +615,7 @@ export default function App() {
             ? `Заявките се изпращат до ${chatProviderNames[chatProvider]}.`
             : `Заявките се изпращат до локален ${chatProviderNames[chatProvider]} сървър.`}
         </span>
+        {messages.length > 0 && !streaming && <button onClick={newChat}>Нов чат</button>}
         {selection && (
           <button
             onClick={() => {

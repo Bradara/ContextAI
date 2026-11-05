@@ -1,10 +1,11 @@
-//! The local database (`contextai.db`, SQLite): history and words to learn; chats later.
+//! The local database (`contextai.db`, SQLite): history, chats and words to learn.
 //!
 //! Rows carry UUIDv7 ids, `updated_at` and a `deleted_at` tombstone instead of being removed at
 //! once, so that a later sync between devices can merge them. Schema changes are numbered
 //! migrations tracked in `PRAGMA user_version`.
 
 mod cards;
+mod chats;
 mod history;
 mod review;
 
@@ -21,6 +22,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 
 pub use cards::{Card, CardEdit, CardQuery, NewCard, SavedCard};
+pub use chats::{ChatMessage, Conversation, ConversationInput, ConversationSummary};
 pub use history::{HistoryEntry, HistoryKind, HistoryQuery, HistorySettings, NewHistoryEntry};
 pub use review::{Direction, ReviewCounts, ReviewItem, ReviewSettings};
 
@@ -139,6 +141,33 @@ const MIGRATIONS: &[&str] = &[
         elapsed_days REAL NOT NULL
     );
     CREATE INDEX reviews_card ON reviews (card_id, direction);
+    "#,
+    // 4: chats ("Обясни", "Обобщи", questions…): the last 20 are kept, pinned ones on top of that.
+    r#"
+    CREATE TABLE conversations (
+        seq INTEGER PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        action TEXT NOT NULL DEFAULT '',
+        selection TEXT NOT NULL DEFAULT '',
+        provider TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        deleted_at INTEGER
+    );
+    CREATE INDEX conversations_updated ON conversations (updated_at DESC) WHERE deleted_at IS NULL;
+    CREATE TABLE messages (
+        seq INTEGER PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
+        conversation_id TEXT NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE INDEX messages_conversation ON messages (conversation_id, position);
     "#,
 ];
 
